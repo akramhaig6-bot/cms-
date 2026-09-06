@@ -30,17 +30,18 @@ function animStyle(node: Node, reduce: boolean): CSSProperties | undefined {
 }
 const animMap: Record<string, string> = { fade: 'aFade .3s ease both', 'slide-up': 'aUp .3s ease both', 'slide-down': 'aDown .3s ease both', zoom: 'aZoom .3s ease both' }
 
-function resolvePageId(doc: DB, path?: string): string | undefined {
+function resolvePageId(doc: DB, path?: string, depth = 0): string | undefined {
   let p = path || '/'
   if (!p.startsWith('/')) p = '/' + p
   const direct = doc.pages.find((x) => x.path === p && x.status === 'published')
   if (direct) return direct.id
-  for (const r of doc.settings.redirects) if (r.from === p) return resolvePageId(doc, r.to)
+  // حماية من حلقات إعادة التوجيه اللانهائية
+  if (depth < 5) for (const r of doc.settings.redirects) if (r.from === p && r.to !== p) return resolvePageId(doc, r.to, depth + 1)
   if (p === '/' && doc.settings.homePageId) {
     const home = doc.pages.find((x) => x.id === doc.settings.homePageId)
     if (home && home.status === 'published') return home.id
   }
-  if (p === '/' || p === '/') { const first = doc.pages.find((x) => x.status === 'published'); return first?.id }
+  if (p === '/') { const first = doc.pages.find((x) => x.status === 'published'); return first?.id }
   return undefined
 }
 
@@ -118,24 +119,29 @@ export default function Site({ doc, initialPath = '/', isolated = false }: Props
     engRef.current = new SiteEngine(doc, hooksRef.current)
     engRef.current.subscribe(refresh)
   }
-  // إطلاق إجراءات «عند الظهور بالتمرير» مرة واحدة عند دخول المكوّن للشاشة
+  // إطلاق إجراءات «عند الظهور بالتمرير» مرة واحدة لكل صفحة (لا تُعاد مع كل تحديث للمسودة)
+  const firedRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     if (isolated || !view.pageId) return
+    firedRef.current = new Set()
+    const docNow = docRef.current
     const ids = new Set<string>()
     const scan = (n: Node) => { if (n.events?.onVisible?.length) ids.add(n.id); (n.children || []).forEach(scan) }
-    const p = doc.pages.find((x) => x.id === view.pageId); if (p) scan(p.root)
+    const p = docNow.pages.find((x) => x.id === view.pageId); if (p) scan(p.root)
     if (!ids.size) return
-    const fired = new Set<string>()
-    const els = document.querySelectorAll('[data-cid]')
     const io = new IntersectionObserver((entries) => {
       for (const en of entries) if (en.isIntersecting) {
         const id = (en.target as HTMLElement).dataset.cid
-        if (id && ids.has(id) && !fired.has(id)) { fired.add(id); const node = engRef.current?.find(id); if (node) engRef.current?.run(node, node.events.onVisible || []) }
+        if (id && ids.has(id) && !firedRef.current.has(id)) {
+          firedRef.current.add(id)
+          const node = engRef.current?.find(id)
+          if (node) engRef.current?.run(node, node.events.onVisible || [])
+        }
       }
     }, { threshold: 0.2 })
-    els.forEach((el) => { const id = (el as HTMLElement).dataset.cid; if (id && ids.has(id)) io.observe(el) })
+    document.querySelectorAll('[data-cid]').forEach((el) => { const id = (el as HTMLElement).dataset.cid; if (id && ids.has(id)) io.observe(el) })
     return () => io.disconnect()
-  }, [view.pageId, doc, isolated])
+  }, [view.pageId, isolated])
   const eng = engRef.current
   useEffect(() => { eng.setDoc(doc) }, [doc, eng])
 
@@ -154,7 +160,10 @@ export default function Site({ doc, initialPath = '/', isolated = false }: Props
     const onPop = (e: PopStateEvent) => {
       const engN = engRef.current
       if (engN && engN.popups.length) { engN.closeTop(); return }
-      const p = docRef.current.pages.find((x) => '/client' + x.path === window.location.pathname)
+      // المسارات العربية تصل مُرمَّزة (percent-encoded) — نفك الترميز قبل المقارنة
+      let pathName = window.location.pathname
+      try { pathName = decodeURIComponent(pathName) } catch { /* keep raw */ }
+      const p = docRef.current.pages.find((x) => '/client' + x.path === pathName)
       if (p) setView({ pageId: p.id })
     }
     window.addEventListener('popstate', onPop)
@@ -163,8 +172,9 @@ export default function Site({ doc, initialPath = '/', isolated = false }: Props
 
   const page = view.pageId ? doc.pages.find((p) => p.id === view.pageId) : undefined
   const activeBars = useMemo(() => {
-    if (!view.pageId) return []
-    return doc.bars.filter((b) => !b.hidden && (b.scope === 'all' || (Array.isArray(b.scope) && b.scope.includes(view.pageId))))
+    const pid = view.pageId
+    if (!pid) return []
+    return doc.bars.filter((b) => !b.hidden && (b.scope === 'all' || (Array.isArray(b.scope) && b.scope.includes(pid))))
   }, [doc.bars, view.pageId])
 
   if (!page || !view.pageId) return <UnderConstruction settings={settings} onHome={() => { const id = resolvePageId(doc, '/'); if (id) gotoPage(id) }} />
@@ -204,7 +214,7 @@ export default function Site({ doc, initialPath = '/', isolated = false }: Props
       const { src } = resolveMedia(node, mediaArr)
       const box: CSSProperties = { position: 'relative', width: '100%', height: s.heightMode === 'px' && s.heightPx ? s.heightPx : 'auto', overflow: 'hidden', borderRadius: s.radius ?? 0, margin: [s.mt,s.mr,s.mb,s.ml].some(x=>x!=null)?`${s.mt??0}px ${s.mr??0}px ${s.mb??0}px ${s.ml??0}px`:undefined }
       return (
-        <div key={node.id} style={box} onClick={(e) => { if (clickable && node.events?.click) { e.stopPropagation(); press() } }}>
+        <div key={node.id} data-cid={node.id} style={box} onClick={(e) => { if (clickable && node.events?.click) { e.stopPropagation(); press() } }}>
           <img src={src} alt={node.alt || node.name} style={{ width: '100%', height: '100%', objectFit: node.fit || 'cover', display: 'block' }} loading="lazy" />
         </div>
       )
@@ -220,12 +230,12 @@ export default function Site({ doc, initialPath = '/', isolated = false }: Props
       if (prog) {
         return <InteractiveButton key={node.id} node={effNode} eng={eng} settings={settings} media={mediaArr} progress={prog} onClickEvent={() => { if (node.events?.click?.length) eng.run(node, node.events.click, { requireProgress: true }) }} />
       }
-      return <span key={node.id} onClick={(e) => { e.stopPropagation(); press() }} style={{ display: 'inline-block', cursor: 'pointer' }}><LeafContent node={effNode} ctx={{ settings, media: mediaArr }} /></span>
+      return <span key={node.id} data-cid={node.id} onClick={(e) => { e.stopPropagation(); press() }} style={{ display: 'inline-block', cursor: 'pointer' }}><LeafContent node={effNode} ctx={{ settings, media: mediaArr }} /></span>
     }
     if (clickable) {
-      return <div key={node.id} onClick={(e) => { e.stopPropagation(); press() }} style={wrapStyle}><LeafContent node={effNode} ctx={{ settings, media: mediaArr }} /></div>
+      return <div key={node.id} data-cid={node.id} onClick={(e) => { e.stopPropagation(); press() }} style={wrapStyle}><LeafContent node={effNode} ctx={{ settings, media: mediaArr }} /></div>
     }
-    return <div key={node.id} style={wrapStyle}><LeafContent node={effNode} ctx={{ settings, media: mediaArr }} /></div>
+    return <div key={node.id} data-cid={node.id} style={wrapStyle}><LeafContent node={effNode} ctx={{ settings, media: mediaArr }} /></div>
   }
 
   const renderBar = (bar: Bar) => {
@@ -267,7 +277,7 @@ export default function Site({ doc, initialPath = '/', isolated = false }: Props
           </div>
         ) : (
           <>
-            {(page.root.children || []).map((c) => renderNode(c))}
+            {(page.root?.children || []).map((c) => renderNode(c))}
             <div style={{ height: bottomBars.length ? 84 : 30 }} />
           </>
         )}
@@ -350,9 +360,18 @@ function PopupContent({ eng, node, settings, media, closeBtn }: { eng: SiteEngin
       return <div style={{ position: 'relative', width: '100%', height: s.heightMode === 'px' && s.heightPx ? s.heightPx : 'auto', overflow: 'hidden', borderRadius: s.radius ?? 0 }} onClick={(e) => { if (clickable && n.events?.click) { e.stopPropagation(); press() } }}><img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: n.fit || 'cover' }} /></div>
     }
     const base = buildStyle(n, settings)
-    if (clickable && n.type === 'button') return <span style={{ display: 'inline-block' }} onClick={(e) => { e.stopPropagation(); press() }}><LeafContent node={n} ctx={{ settings, media }} /></span>
-    if (clickable) return <div style={{ ...base, position: 'relative' }} onClick={(e) => { e.stopPropagation(); press() }}><LeafContent node={n} ctx={{ settings, media }} /></div>
-    return <div style={{ ...base, position: 'relative' }}><LeafContent node={n} ctx={{ settings, media }} /></div>
+    // استبدال المتغيرات الحية داخل النوافذ أيضًا
+    const effNode = n.type === 'text' || n.type === 'button' ? { ...n, text: expandVars(n.text || '', eng) } : n
+    if (clickable && n.type === 'button') {
+      // زر بشريط تقدم داخل النافذة: نفس سلوك الصفحة (التنفيذ عند اكتمال الشريط)
+      const prog = n.progress?.enabled ? n.progress : undefined
+      if (prog) {
+        return <InteractiveButton node={effNode} eng={eng} settings={settings} media={media} progress={prog} onClickEvent={() => { if (n.events?.click?.length) eng.run(n, n.events.click, { requireProgress: true }) }} />
+      }
+      return <span style={{ display: 'inline-block' }} onClick={(e) => { e.stopPropagation(); press() }}><LeafContent node={effNode} ctx={{ settings, media }} /></span>
+    }
+    if (clickable) return <div style={{ ...base, position: 'relative' }} onClick={(e) => { e.stopPropagation(); press() }}><LeafContent node={effNode} ctx={{ settings, media }} /></div>
+    return <div style={{ ...base, position: 'relative' }}><LeafContent node={effNode} ctx={{ settings, media }} /></div>
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>

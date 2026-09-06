@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { DB, PublishEntry, Notification, Session, Node, NType, EventName, Page, Bar, Popup, Flow, Lib } from '../types'
+import type { DB, PublishEntry, Notification, Session, Node, NType, EventName, Page, Bar, Popup, Flow, Lib, Account } from '../types'
 import { clone, uid, NTYPE_LABEL, createNode, accepts, normalizeSlug } from './util'
 import { countNodes } from './tree'
 import { seedDB, STORAGE_KEY } from './seed'
@@ -68,12 +68,16 @@ export interface StoreCtx {
   redo: () => void
   // إجراءات على مستوى DB
   setDB: (db: DB) => void
+  updateDB: (fn: (db: DB) => DB) => void
   updateSettings: (patch: any) => void
   // نشر
   publish: (note?: string) => void
+  publishSelected: (keys: string[]) => void
   rollback: (entryId: string) => void
   discardToPublished: () => void
   pendingCount: number
+  // صلاحيات
+  canEdit: boolean
   // متغيرات
   addVar: (name: string) => void
   removeVar: (id: string) => void
@@ -93,20 +97,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   })
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [toasts, setToasts] = useState<{ id: string; msg: string; type: string }[]>([])
-  const undoRef = useRef<{ kind: EntKind; id: string; prevRoot: Node }[]>([])
+  const undoRef = useRef<{ kind: EntKind; id: string; prevRoot: Node; nextRoot: Node }[]>([])
   const redoRef = useRef<typeof undoRef.current>([])
   const [undoDepth, setUndoDepth] = useState(0)
   const [redoDepth, setRedoDepth] = useState(0)
+  const quotaWarned = useRef(false)
+  const canEdit = session.role !== 'viewer'
 
   const setShapeAll = useCallback((s: PersistShape, opts?: { save?: boolean }) => {
     shapeRef.current = s
     setShape(s)
-    if (opts?.save !== false) persistDebounced(s)
+    // الحفظ المؤجل (debounced) — كان الخطأ القديم يستدعي الـ ref نفسه فينهار أي حفظ
+    if (opts?.save !== false) persistDebounced_(s)
   }, [])
 
   const persistDebounced = useRef(0)
   function persistNow(s: PersistShape) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)) } catch (e) { console.warn('persist fail', e) }
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
+    } catch (e) {
+      // فشل الحفظ (غالبًا امتلاء حصة localStorage) — لا نبتلعه بصمت
+      console.warn('persist fail', e)
+      if (!quotaWarned.current) {
+        quotaWarned.current = true
+        toast('تعذّر الحفظ المحلي: مساحة التخزين ممتلئة — احذف وسائط كبيرة أو نشرات قديمة ثم أعد المحاولة', 'err')
+      }
+    }
   }
   function persistDebounced_(s: PersistShape) {
     clearTimeout(persistDebounced.current)
@@ -140,6 +156,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setToasts((t) => [...t.slice(-2), { id, msg, type }])
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2600)
   }, [])
+  // حارس الصلاحيات: يمنع «العارض» من أي تعديل/نشر على مستوى المتجر كله
+  const guardEdit = useCallback((): boolean => {
+    if (session.role === 'viewer') { toast('أنت في وضع القراءة فقط — لا يمكن التعديل أو النشر', 'err'); return false }
+    return true
+  }, [session, toast])
   const notify = useCallback((n: Partial<Notification> & { text: string }) => {
     setShapeAll({ ...shapeRef.current, notifications: [{
       id: uid('not'), type: n.type || 'info', text: n.text, at: Date.now(), read: false, ref: n.ref,
@@ -163,7 +184,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [])
   const setRole = useCallback((accountId: string, role: string) => {
     const d = shapeRef.current.db
-    const accounts = d.settings.accounts.map((a) => (a.id === accountId ? { ...a, role } : a))
+    const accounts = d.settings.accounts.map((a) => (a.id === accountId ? { ...a, role: role as Account['role'] } : a))
     setShapeAll({ ...shapeRef.current, db: { ...d, settings: { ...d.settings, accounts } } })
     if (session.accountId === accountId && session.loggedIn) {
       const ns = { ...session, role: role as any }
@@ -182,20 +203,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return { id: uid('lib'), name: 'مكوّن مخصص', cat: 'عام', updatedAt: Date.now(), root }
   }
   const addEntity = useCallback((k: EntKind, partial?: any) => {
+    if (!guardEdit()) return null
     const ent = { ...defaultEntity(k), ...(partial || {}) }
     const arr = shapeRef.current.db[k] as any[]
     setShapeAll({ ...shapeRef.current, db: { ...shapeRef.current.db, [k]: [...arr, ent] } })
     flashSave()
     return ent
-  }, [setShapeAll])
+  }, [setShapeAll, guardEdit])
 
   const updateEntity = useCallback((k: EntKind, id: string, patch: any) => {
+    if (!guardEdit()) return
     const arr = shapeRef.current.db[k] as any[]
     const next = arr.map((e) => (e.id === id ? { ...e, ...patch } : e))
     setShapeAll({ ...shapeRef.current, db: { ...shapeRef.current.db, [k]: next } })
-  }, [setShapeAll])
+  }, [setShapeAll, guardEdit])
 
   const deleteEntity = useCallback((k: EntKind, id: string) => {
+    if (!guardEdit()) return { refs: 0, name: '' }
     const d = shapeRef.current.db
     const ent: any = (d[k] as any[]).find((e) => e.id === id)
     let refs = 0
@@ -212,13 +236,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     for (const p of d.pages) scan(p.root)
     for (const b of d.bars) scan(b.root)
     for (const po of d.popups) scan(po.root)
+    // مراجع خطوات التدفقات أيضًا
+    for (const f of d.flows) for (const s of f.steps || []) if (s.target && s.target.id === id) refs++
     const arr = (d[k] as any[]).filter((e) => e.id !== id)
     setShapeAll({ ...shapeRef.current, db: { ...d, [k]: arr } })
     notify({ type: 'warn', text: `تم حذف ${kindName(k)} «${ent?.name || ''}»` + (refs ? ` مع ${refs} إجراء/مرجع أصبح مكسورًا.` : '.'), ref: { kind: 'entity', label: ent?.name } })
     return { refs, name: ent?.name || '' }
-  }, [setShapeAll, notify])
+  }, [setShapeAll, notify, guardEdit])
 
   const duplicateEntity = useCallback((k: EntKind, id: string) => {
+    if (!guardEdit()) return
     const d = shapeRef.current.db
     const ent: any = (d[k] as any[]).find((e) => e.id === id)
     if (!ent) return
@@ -232,7 +259,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (k === 'flows') copy.steps = (copy.steps || []).map((s: any) => ({ ...s, id: uid('a') }))
     setShapeAll({ ...shapeRef.current, db: { ...d, [k]: [...(d[k] as any[]), copy] } })
     toast(`تم تكرار ${kindName(k)} «${ent.name}»`, 'ok')
-  }, [setShapeAll, toast])
+  }, [setShapeAll, toast, guardEdit])
 
   function reIdTree(n: Node) {
     n.id = uid(n.type)
@@ -240,25 +267,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }
 
   const toggleStatus = useCallback((k: EntKind, id: string) => {
+    if (!guardEdit()) return
     const d = shapeRef.current.db
     if (k === 'pages') {
+      const cur = d.pages.find((p) => p.id === id)
+      if (cur?.status === 'draft') { toast('الصفحة مسودة — غيّر حالتها من «إعدادات الكيان» داخل المحرر', 'info'); return }
       const arr = d.pages.map((p) => (p.id === id ? { ...p, status: p.status === 'hidden' ? 'published' : 'hidden' as any, updatedAt: Date.now() } : p))
       setShapeAll({ ...shapeRef.current, db: { ...d, pages: arr } })
     } else if (k === 'bars') {
       const arr = d.bars.map((b) => (b.id === id ? { ...b, hidden: !b.hidden } : b))
       setShapeAll({ ...shapeRef.current, db: { ...d, bars: arr } })
     }
-  }, [setShapeAll])
+  }, [setShapeAll, guardEdit, toast])
 
   // ---------- تحرير الشجرة ----------
   const patchRoot = useCallback((k: EntKind, id: string, cb: (root: Node) => Node, opts?: { noUndo?: boolean }) => {
+    if (!guardEdit()) return
     const d = shapeRef.current.db
     const arr = (d[k] as any[]) as { id: string; root: Node }[]
     const idx = arr.findIndex((e) => e.id === id)
     if (idx < 0) return
     const entity = arr[idx]
-    const undoSnapshot = opts?.noUndo ? null : { kind: k, id, prevRoot: clone(entity.root) }
     const newRoot = cb(entity.root)
+    if (!newRoot) return // رفض تخريب الجذر (مثل حذفه)
+    const undoSnapshot = opts?.noUndo ? null : { kind: k, id, prevRoot: clone(entity.root), nextRoot: clone(newRoot) }
     const nextArr = arr.map((e, i) => (i === idx ? { ...e, root: newRoot, updatedAt: Date.now() } : e))
     setShapeAll({ ...shapeRef.current, db: { ...d, [k]: nextArr } })
     if (undoSnapshot) {
@@ -268,7 +300,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setUndoDepth(undoRef.current.length)
       setRedoDepth(0)
     }
-  }, [setShapeAll])
+  }, [setShapeAll, guardEdit])
 
   const undo = useCallback(() => {
     const top = undoRef.current.pop()
@@ -292,17 +324,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const arr = (d[top.kind] as any[]) as { id: string; root: Node }[]
     const idx = arr.findIndex((e) => e.id === top.id)
     if (idx < 0) return
-    const next = arr.map((e, i) => (i === idx ? { ...e, root: top.prevRoot, updatedAt: Date.now() } : e))
+    // الإعادة تستعيد الحالة «بعد» التعديل (nextRoot) وليس ما قبله
+    const next = arr.map((e, i) => (i === idx ? { ...e, root: top.nextRoot, updatedAt: Date.now() } : e))
     setShapeAll({ ...shapeRef.current, db: { ...d, [top.kind]: next } })
   }, [setShapeAll])
 
   const setDB = useCallback((db: DB) => {
+    if (!guardEdit()) return
     setShapeAll({ ...shapeRef.current, db })
-  }, [setShapeAll])
+  }, [setShapeAll, guardEdit])
+  // تحديث وظيفي آمن: يقرأ أحدث نسخة من db (يمنع فقدان البيانات عند رفع عدة ملفات معًا)
+  const updateDB = useCallback((fn: (db: DB) => DB) => {
+    if (!guardEdit()) return
+    setShapeAll({ ...shapeRef.current, db: fn(shapeRef.current.db) })
+  }, [setShapeAll, guardEdit])
   const updateSettings = useCallback((patch: any) => {
+    if (!guardEdit()) return
     const d = shapeRef.current.db
     setShapeAll({ ...shapeRef.current, db: { ...d, settings: { ...d.settings, ...patch } } })
-  }, [setShapeAll])
+  }, [setShapeAll, guardEdit])
 
   const markAllRead = useCallback(() => {
     setShapeAll({ ...shapeRef.current, notifications: shapeRef.current.notifications.map((n) => ({ ...n, read: true })) })
@@ -315,39 +355,72 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const pendingCount = useMemoPending()
   function useMemoPending() { return computePending(shape.db, shape.published).length }
   const publish = useCallback((note?: string) => {
+    if (!guardEdit()) return
     const s = shapeRef.current
     const entry: PublishEntry = { id: uid('pub'), at: Date.now(), by: session.name || 'مدير', kind: 'publish', note: note || `نشر ${computePending(s.db, s.published).length} تغيير`, snap: clone(s.db) }
     const history = [entry, ...s.history].slice(0, 40)
     setShapeAll({ ...s, published: clone(s.db), history })
     notify({ type: 'success', text: `تم النشر بنجاح — ${entry.note}` })
-  }, [setShapeAll, notify, session])
+  }, [setShapeAll, notify, session, guardEdit])
+
+  // نشر جزئي حقيقي: تُنقل العناصر المحددة فقط (kind:id) من المسودة إلى النسخة المنشورة
+  const publishSelected = useCallback((keys: string[]) => {
+    if (!guardEdit()) return
+    const s = shapeRef.current
+    const kinds: EntKind[] = ['pages', 'bars', 'popups', 'flows', 'libs']
+    const nextPub: DB = clone(s.published)
+    let done = 0
+    for (const key of keys) {
+      const [k, id] = key.split(':')
+      if (!kinds.includes(k as EntKind) || !id) continue
+      const src = (s.db as any)[k] as any[]
+      const ent = src.find((x: any) => x.id === id)
+      const dst = (nextPub as any)[k] as any[]
+      if (ent) {
+        const i = dst.findIndex((x: any) => x.id === id)
+        if (i >= 0) dst[i] = clone(ent)
+        else dst.push(clone(ent))
+      } else {
+        (nextPub as any)[k] = dst.filter((x: any) => x.id !== id)
+      }
+      done++
+    }
+    if (!done) return
+    const entry: PublishEntry = { id: uid('pub'), at: Date.now(), by: session.name || 'مدير', kind: 'publish', note: `نشر ${done} عنصرًا محددًا`, snap: clone(nextPub) }
+    setShapeAll({ ...s, published: nextPub, history: [entry, ...s.history].slice(0, 40) })
+    notify({ type: 'success', text: `تم نشر ${done} عنصرًا محددًا. باقي المسودات لم تُنشر بعد.` })
+  }, [setShapeAll, notify, session, guardEdit])
 
   const rollback = useCallback((entryId: string) => {
+    if (!guardEdit()) return
     const s = shapeRef.current
     const entry = s.history.find((h) => h.id === entryId)
     if (!entry) return
     const roll: PublishEntry = { id: uid('pub'), at: Date.now(), by: session.name || 'مدير', kind: 'rollback', note: `استرجاع نشرة «${entry.note}»`, snap: clone(entry.snap) }
     setShapeAll({ ...s, published: clone(entry.snap), db: clone(entry.snap), history: [roll, ...s.history].slice(0, 40) })
     notify({ type: 'warn', text: 'تم استرجاع النسخة، وأصبحت منشورة لدى العملاء فورًا.' })
-  }, [setShapeAll, notify, session])
+  }, [setShapeAll, notify, session, guardEdit])
 
   const discardToPublished = useCallback(() => {
+    if (!guardEdit()) return
     const s = shapeRef.current
     setShapeAll({ ...s, db: clone(s.published) })
     undoRef.current = []; redoRef.current = []
     setUndoDepth(0); setRedoDepth(0)
     notify({ type: 'info', text: 'تم تجاهل المسودات وإعادة الحالة إلى آخر نسخة منشورة.' })
-  }, [setShapeAll, notify])
+  }, [setShapeAll, notify, guardEdit])
 
   const addVar = useCallback((name: string) => {
+    if (!guardEdit()) return
     const d = shapeRef.current.db
     const v = { id: uid('v'), name, vtype: 'number' as const, def: 0, scope: 'session' as const }
     setShapeAll({ ...shapeRef.current, db: { ...d, variables: [...d.variables, v as any] } })
-  }, [setShapeAll])
+  }, [setShapeAll, guardEdit])
   const removeVar = useCallback((id: string) => {
+    if (!guardEdit()) return
     const d = shapeRef.current.db
     setShapeAll({ ...shapeRef.current, db: { ...d, variables: d.variables.filter((v) => v.id !== id) } })
-  }, [setShapeAll])
+  }, [setShapeAll, guardEdit])
 
   const value: StoreCtx = {
     db: shape.db, published: shape.published, history: shape.history, notifications: shape.notifications,
@@ -355,9 +428,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     login, logout, setRole,
     toast, toasts, notify, markAllRead, removeNotif,
     addEntity, updateEntity, deleteEntity, duplicateEntity, toggleStatus,
-    patchRoot, undo, redo, setDB, updateSettings,
-    publish, rollback, discardToPublished, pendingCount,
-    addVar, removeVar,
+    patchRoot, undo, redo, setDB, updateDB, updateSettings,
+    publish, publishSelected, rollback, discardToPublished, pendingCount,
+    addVar, removeVar, canEdit,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

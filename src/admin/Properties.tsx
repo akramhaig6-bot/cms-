@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import type { Node, Settings, EventName } from '../types'
-import { Field, TextInput, TextArea, Select, Toggle, Seg, Icon as U } from './uikit'
-import { NTYPE_LABEL, LEAF, isContainer } from '../lib/util'
+import type { Node, Settings, ProgressCfg } from '../types'
+import { Field, TextInput, TextArea, Select, Toggle, Seg } from './uikit'
+import { NTYPE_LABEL, isContainer } from '../lib/util'
 import { Icon } from '../lib/icons'
 import { actionLabel, pickTree } from './ActionModal'
 import { useStore } from '../lib/store'
@@ -85,19 +85,19 @@ function ContentTab({ node, set, settings, media }: { node: Node; set: (p: Parti
     return <div>
       <Row label="نوع النص"><Seg value={node.textKind || 'paragraph'} onChange={(v) => set({ textKind: v as any })}
         options={[{value:'heading1',label:'عنوان ١'},{value:'heading2',label:'عنوان ٢'},{value:'heading3',label:'عنوان ٣'},{value:'paragraph',label:'فقرة'},{value:'label',label:'تسمية'}]} /></Row>
-      <Row label="النص"><TextArea rows={5} value={node.text || ''} onChange={(e) => set({ text: e.target.value })} /></Row>
+      <Row label="النص"><TextArea rows={5} value={node.text || ''} onChange={(e: any) => set({ text: e.target.value })} /></Row>
       <ToggleRow on={!!node.hideWhenEmpty} onValue={(v) => set({ hideWhenEmpty: v })} label="إخفاء عند الفراغ في /client" />
     </div>
   }
   if (node.type === 'button') {
     return <div>
-      <Row label="نص الزر"><TextInput value={node.text || ''} onChange={(e) => set({ text: e.target.value })} /></Row>
+      <Row label="نص الزر"><TextInput value={node.text || ''} onChange={(e: any) => set({ text: e.target.value })} /></Row>
       <Row label="أيقونة (اختياري)"><IconButton node={node} set={set} /></Row>
     </div>
   }
   if (node.type === 'badge') {
     return <div>
-      <Row label="نص الشارة"><TextInput value={node.text || ''} onChange={(e) => set({ text: e.target.value })} /></Row>
+      <Row label="نص الشارة"><TextInput value={node.text || ''} onChange={(e: any) => set({ text: e.target.value })} /></Row>
       <ColorField label="لون الشارة" value={node.badgeColor || '#f59e0b'} onValue={(v) => set({ badgeColor: v })} presets={['#0ea5e9','#f59e0b','#059669','#dc2626','#7c3aed','#94a3b8']} />
     </div>
   }
@@ -108,7 +108,7 @@ function ContentTab({ node, set, settings, media }: { node: Node; set: (p: Parti
         {m && <div className="mb-2 overflow-hidden rounded-xl"><img src={m.dataUrl} className="h-24 w-full object-cover" /></div>}
         <button onClick={() => window.dispatchEvent(new CustomEvent('cms:openmedia'))} className="btn-ghost w-full rounded-xl py-3 text-[13.5px] tap">📁 اختيار من مكتبة الوسائط</button>
       </Row>
-      <Row label="النص البديل"><TextInput value={node.alt || ''} onChange={(e) => set({ alt: e.target.value })} /></Row>
+      <Row label="النص البديل"><TextInput value={node.alt || ''} onChange={(e: any) => set({ alt: e.target.value })} /></Row>
       <Row label="أسلوب العرض"><Seg value={node.fit || 'cover'} onChange={(v) => set({ fit: v as any })} options={[{value:'cover',label:'تغطية'},{value:'contain',label:'احتواء'},{value:'fill',label:'ملء'}]} /></Row>
       {(node.mediaId || node.src) && <button onClick={() => set({ mediaId: undefined, src: undefined })} className="w-full rounded-xl py-2.5 text-[13px] text-rose-600 tap hover:bg-rose-50">حذف الصورة</button>}
     </div>
@@ -255,10 +255,13 @@ function BehaviorTab({ node, set, onDelete }: { node: Node; set: (p: Partial<Nod
     </div>
     {node.type === 'button' && <div className="mt-3 rounded-xl border border-sky-100 p-3">
       <ToggleRow on={!!node.progress?.enabled} onValue={(v) => set({ progress: { enabled: v, duration: node.progress?.duration || 2000, start: node.progress?.start || 'click', cancellable: node.progress?.cancellable ?? true } })} label="شريط تقدم قبل التنفيذ" />
-      {node.progress?.enabled && <>
-        <StyleRow label="المدة"><Seg value={String(node.progress.duration || 2000)} onChange={(v) => set({ progress: { ...node.progress, duration: Number(v) } })} options={[{value:'1000',label:'١ث'},{value:'2000',label:'٢ث'},{value:'3000',label:'٣ث'}]} /></StyleRow>
-        <StyleRow label="البداية"><Seg value={node.progress.start || 'click'} onChange={(v) => set({ progress: { ...node.progress, start: v as any } })} options={[{value:'click',label:'عند الضغط'},{value:'auto',label:'تلقائي'}]} /></StyleRow>
-      </>}
+      {node.progress?.enabled && (() => {
+        const base: ProgressCfg = { enabled: true, duration: node.progress?.duration || 2000, start: node.progress?.start || 'click', cancellable: node.progress?.cancellable ?? true, color: node.progress?.color }
+        return <>
+          <StyleRow label="المدة"><Seg value={String(base.duration)} onChange={(v) => set({ progress: { ...base, duration: Number(v) } })} options={[{value:'1000',label:'١ث'},{value:'2000',label:'٢ث'},{value:'3000',label:'٣ث'}]} /></StyleRow>
+          <StyleRow label="البداية"><Seg value={base.start} onChange={(v) => set({ progress: { ...base, start: v as any } })} options={[{value:'click',label:'عند الضغط'},{value:'auto',label:'تلقائي'}]} /></StyleRow>
+        </>
+      })()}
     </div>}
   </div>
 }
@@ -304,7 +307,7 @@ function CondPick({ node, set }: { node: Node; set: (p: Partial<Node>) => void }
 function AdvancedTab({ node, set, onDelete }: { node: Node; set: (p: Partial<Node>) => void; onDelete?: () => void }) {
   return <div>
     <Field label="الاسم الداخلي (المعرف)">
-      <TextInput value={node.name} onChange={(e) => set({ name: e.target.value })} />
+      <TextInput value={node.name} onChange={(e: any) => set({ name: e.target.value })} />
     </Field>
     <div className="mt-3"><button onClick={() => { navigator.clipboard?.writeText(node.id); }} className="w-full rounded-xl bg-slate-100 py-2.5 text-[13px] text-slate-600 tap">نسخ معرّف المكوّن</button></div>
     <button onClick={onDelete} className="mt-2 w-full rounded-xl bg-rose-50 py-2.5 text-[13px] font-semibold text-rose-600 tap">حذف المكوّن نهائيًا</button>

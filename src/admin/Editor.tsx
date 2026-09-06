@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import type { DB, Node, NType, EntKind, Page } from '../types'
+import type { DB, Node, NType } from '../types'
 import { useStore } from '../lib/store'
 import { createNode, NTYPE_LABEL, isContainer, LEAF_META, CONTAINER_META, uid } from '../lib/util'
 import { updateNode, findNode, removeNode, locate, countNodes } from '../lib/tree'
@@ -37,8 +37,10 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
   const [renameOpen, setRenameOpen] = useState(false)
   const [cfgOpen, setCfgOpen] = useState(false)
 
+  const meta: any = entity
   const root = entity?.root as Node | undefined
   const readOnly = store.session.role === 'viewer'
+  const isLocked = !!meta?.lockedBy && meta.lockedBy !== store.session.accountId
 
   // تحديد مكوّن قادم من شاشة المراجع المكسورة وفتح خصائصه
   useEffect(() => {
@@ -47,7 +49,7 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
   }, [autoFocusId])
 
   useEffect(() => {
-    if (!readOnly && !meta.lockedBy && store.session.accountId) {
+    if (!readOnly && !meta?.lockedBy && store.session.accountId) {
       store.updateEntity(kind, id, { lockedBy: store.session.accountId })
     }
     return () => {
@@ -76,9 +78,7 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
     return <div className="flex h-full items-center justify-center text-slate-400"><button onClick={onExit}>العودة</button></div>
   }
 
-  const meta = entity as any
   const mediaArr = db.media
-  const isLocked = meta.lockedBy && meta.lockedBy !== store.session.accountId
   const effectiveReadOnly = readOnly || isLocked
 
   const patch = (newRoot: Node) => store.patchRoot(kind, id, () => newRoot)
@@ -104,7 +104,7 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
     }
     const nn = createNode(type)
     nn.style.widthMode = 'full'
-    if (type === 'text') { nn.style.widthMode = 'auto'; nn.textAlign = 'center' as any }
+    if (type === 'text') { nn.style.widthMode = 'auto'; nn.style.textAlign = 'center' }
     patch(insertInto(root, containerId, nn, index))
     setSelectedId(nn.id)
     setAddSheet(false); setPickerOpen(null)
@@ -121,14 +121,19 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
   const del = () => {
     if (!selected) return
     if (readOnly) { store.toast('وضع القراءة فقط', 'err'); return }
+    // الجذر لا يُحذف — حذف يُفسد الصفحة نهائيًا لدى العميل
+    if (selected.id === root.id) { store.toast('لا يمكن حذف جذر الصفحة — احذف أبناءه بدلًا منه', 'err'); return }
     const count = countNodes(selected)
     if (count > 1 || hasRefs(selected)) { setConfirmDel(true); return }
-    patch(removeNode(root, selected.id)!)
+    const nr = removeNode(root, selected.id)
+    if (nr) patch(nr)
     setSelectedId(null); setPropsOpen(false)
   }
   const confirmDelete = () => {
     if (!selected) return
-    patch(removeNode(root, selected.id)!)
+    if (selected.id === root.id) { store.toast('لا يمكن حذف جذر الصفحة', 'err'); setConfirmDel(false); return }
+    const nr = removeNode(root, selected.id)
+    if (nr) patch(nr)
     setSelectedId(null); setPropsOpen(false); setConfirmDel(false)
     store.toast('تم حذف المكوّن' + (hasRefs(selected) ? ' وإجراءاته أصبحت مكسورة' : ''), 'ok')
   }
@@ -166,7 +171,7 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
   const saveAction = (a: any) => {
     if (!selected) return
     const evs = { ...(selected.events || {}) }
-    const list = (evs.click || []).filter((x) => x.id !== a.id)
+    const list = (evs.click || []).filter((x: any) => x.id !== a.id)
     evs.click = [...list, a]
     changeNode({ ...selected, events: evs })
   }
@@ -192,9 +197,9 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
         <SaveBadge />
         <button onClick={() => store.undo()} disabled={store.undoDepth === 0} className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 tap hover:bg-sky-100 disabled:opacity-25" title="تراجع"><Icon name="undo" size={18} /></button>
         <button onClick={() => store.redo()} disabled={store.redoDepth === 0} className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 tap hover:bg-sky-100 disabled:opacity-25" title="إعادة"><Icon name="redo" size={18} /></button>
-        {(kind === 'bars' || kind === 'popups') && <button onClick={() => setCfgOpen(true)} className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 tap hover:bg-sky-100" title="إعدادات {entityKindLabel(kind)}"><Icon name="settings" size={18} /></button>}
+        {(kind === 'bars' || kind === 'popups') && <button onClick={() => setCfgOpen(true)} className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 tap hover:bg-sky-100" title={`إعدادات ${entityKindLabel(kind)}`}><Icon name="settings" size={18} /></button>}
         <button onClick={onPreview} className="flex h-10 w-10 items-center justify-center rounded-xl text-sky-700 tap hover:bg-sky-100" title="معاينة"><Icon name="eye" size={19} /></button>
-        {kind !== 'libs' && !readOnly && <button onClick={() => { store.notify({ type: 'success', text: `تم نشر «${meta.name}» ${entityKindLabel(kind)}.` }); store.publish(`نشر ${entityKindLabel(kind)}: ${meta.name}`); store.toast('تم النشر', 'ok') }} className="flex h-10 items-center gap-1 rounded-xl bg-sky-500 px-3 text-[12.5px] font-bold text-white tap"><Icon name="send" size={15} /> نشر</button>}
+        {kind !== 'libs' && !readOnly && <button onClick={() => { store.publishSelected([`${kind}:${id}`]); store.toast(`تم نشر «${meta.name}» — باقي المسودات لم تُنشر`, 'ok') }} className="flex h-10 items-center gap-1 rounded-xl bg-sky-500 px-3 text-[12.5px] font-bold text-white tap"><Icon name="send" size={15} /> نشر</button>}
         <button onClick={() => setTreeOpen(true)} className="flex h-10 w-10 items-center justify-center rounded-xl text-sky-700 tap hover:bg-sky-100"><Icon name="layers" size={18} /></button>
       </div>
 
@@ -406,7 +411,7 @@ function RenameForm({ entity, kind, db, onDone }: { entity: any; kind: string; d
   const [name, setName] = useState(entity?.name || '')
   const [path, setPath] = useState(entity?.path || '')
   const [title, setTitle] = useState(entity?.title || '')
-  const [status, setStatus] = useState(entity?.status || entity?.hidden !== undefined ? (entity.hidden ? 'hidden' : 'published') : 'published')
+  const [status, setStatus] = useState(entity?.status || (entity?.hidden !== undefined ? (entity.hidden ? 'hidden' : 'published') : 'published'))
   const save = () => {
     const patch: any = { name }
     if (isPage) { patch.path = path; patch.title = title; patch.status = status }
@@ -440,9 +445,9 @@ export function MediaPicker({ open, onClose, onPick }: { open: boolean; onClose:
     setAdding(true)
     const rd = new FileReader()
     rd.onload = () => {
-      const d = db
       const m = { id: uid('m'), name: file.name, type: 'image' as const, mime: file.type, size: file.size, dataUrl: String(rd.result), at: Date.now() }
-      store.setDB({ ...d, media: [...d.media, m] })
+      // تحديث وظيفي — يمنع الكتابة فوق وسائط رُفعت في نفس اللحظة
+      store.updateDB((d) => ({ ...d, media: [...d.media, m] }))
       setAdding(false)
     }
     rd.readAsDataURL(file)
@@ -491,7 +496,7 @@ function EntityConfig({ kind, entity, db, open, onClose }: { kind: EditKind; ent
               {db.pages.map((p) => {
                 const on = scopePages.includes(p.id)
                 return (
-                  <button key={p.id} onClick={() => up({ scope: on ? scopePages.filter((x) => x !== p.id) : [...scopePages, p.id] })} className={'my-0.5 flex w-full items-center justify-between rounded-lg px-3 py-2 text-start tap ' + (on ? 'bg-sky-100' : 'bg-white')}>
+                  <button key={p.id} onClick={() => up({ scope: on ? scopePages.filter((x: string) => x !== p.id) : [...scopePages, p.id] })} className={'my-0.5 flex w-full items-center justify-between rounded-lg px-3 py-2 text-start tap ' + (on ? 'bg-sky-100' : 'bg-white')}>
                     <span className="text-[13px]">{p.name}</span>
                     {on ? <span className="text-sky-600"><Icon name="check" size={16} /></span> : <span className="text-slate-300"><Icon name="plus" size={16} /></span>}
                   </button>

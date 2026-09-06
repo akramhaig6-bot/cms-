@@ -41,6 +41,7 @@ export const LEAF_META: { t: NType; icon: string; label: string; desc: string }[
   { t:'icon', icon:'✦', label:'أيقونة', desc:'أيقونة ملونة' },
   { t:'badge', icon:'➤', label:'شارة', desc:'شارة صغيرة' },
   { t:'spacer', icon:'⋮', label:'مسافة', desc:'تباعد رأسي/أفقي' },
+  { t:'progress', icon:'▬', label:'شريط تقدم', desc:'يمتلئ تدريجيًا' },
 ]
 
 // ---------- نمط افتراضي لكل نوع ----------
@@ -99,9 +100,6 @@ export function accepts(container: NType, child: NType): boolean {
   if (isContainer(container)) return true          // الحاويات تقبل أي شيء
   return false                                      // العناصر النهائية لا تقبل أطفالاً
 }
-
-// العناصر الجذرية التي لا توضع داخل الكانفاس مباشرة (تدار بمديرها)
-export const OUTER_TYPES = ['bar','popup'] as NType[]
 
 export function normalizeSlug(s: string) {
   let out = s.trim().toLowerCase()

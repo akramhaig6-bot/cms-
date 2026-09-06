@@ -49,15 +49,18 @@ const PATHS: Record<string, string[]> = {
   palette: ['M12 3a9 9 0 000 18h1a2 2 0 000-4h-1a2 2 0 010-4h3a2 2 0 002-2 5 5 0 00-5-8z'],
   ruler: ['M2 12l9-9 11 11-9 9z','M6 9l1 1','M9 12l1 1'],
   text: ['M4 6h16','M12 6v14','M9 20h6'],
+  info: ['M12 21a9 9 0 100-18 9 9 0 000 18z','M12 8h.01','M12 12v4'],
 }
 
 export function Icon({ name, size = 20, color = 'currentColor', sw = 1.8, className }: {
   name: string; size?: number; color?: string; sw?: number; className?: string
 }) {
-  const paths = PATHS[name] || PATHS.chevronDown
-  if (name.startsWith('http') || name.startsWith('data:')) {
-    return <img src={name} width={size} height={size} alt="" style={{ objectFit: 'contain' }} />
+  const name_ = name || ''
+  if (name_.startsWith('http') || name_.startsWith('data:')) {
+    return <img src={name_} width={size} height={size} alt="" style={{ objectFit: 'contain' }} />
   }
+  // احتياطي آمن: أي اسم غير معروف يعرض سهمًا بدل الانهيار (المفتاح الصحيح 'chevron-down')
+  const paths = PATHS[name_] || PATHS['chevron-down']
   return (
     <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none"
       stroke={color} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"

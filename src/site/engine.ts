@@ -66,7 +66,8 @@ export class SiteEngine {
   }
 
   private async runOne(a: Action, src: Node | null) {
-    if (a.delay) await sleep(a.delay)
+    // الواجهة تُدخل التأخير بالثواني — نحوّله إلى مللي ثانية هنا
+    if (a.delay) await sleep(a.delay * 1000)
     const target = a.target
     switch (a.type) {
       case 'nav': {
@@ -83,7 +84,7 @@ export class SiteEngine {
         if (target?.kind === 'popup') this.openPopup(target.id!)
         return
       }
-      case 'closePopup': if (target?.kind === 'popup') this.closePopup(target.id!); else this.closeTop(); return
+      case 'closePopup': if (target?.kind === 'popup' && target.id) this.closePopup(target.id); else this.closeTop(); return
       case 'closeAllPopups': this.closeAll(); return
       case 'show': if (target?.kind === 'node') this.show(target.id!); return
       case 'hide': if (target?.kind === 'node') this.hide(target.id!); return

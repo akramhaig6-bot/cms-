@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState } from 'react'
-import type { DB } from '../types'
+import type { Account, DB, Node } from '../types'
 import { useStore, computePending } from '../lib/store'
 import { SubTopBar, Empty, Confirm, Modal, Field, TextInput, Seg, Toggle, Chip } from './uikit'
 import { Icon } from '../lib/icons'
 import { uid, normalizeSlug } from '../lib/util'
 import { actionLabel, ActionModal } from './ActionModal'
-import { findBroken, dropBrokenAction } from '../lib/broken'
+import { findBroken, dropBrokenAction, dropBrokenMedia, dropBrokenCond, type BrokenItem } from '../lib/broken'
 
 // ---------------- لوحة التحكم الرئيسية ----------------
 export function Dashboard({ go }: { go: (v: string) => void }) {
@@ -75,13 +75,13 @@ export function Settings({ back, openPage }: { back: () => void; openPage: (id: 
           <Field label="اللغة / الاتجاه"><Seg value={S.dir} onChange={(v) => { up({ dir: v, lang: v === 'rtl' ? 'ar' : 'en' }) }} options={[{value:'rtl',label:'عربي RTL'},{value:'ltr',label:'إنجليزي LTR'}]} /></Field>
           <div className="rounded-2xl bg-white border p-3"><div className="mb-2 text-[13px] font-bold text-slate-600">ألوان الهوية (تظهر في /client وبعض الخيارات)</div>
             <div className="space-y-2">
-              {[['primary','اللون الأساسي'],['text','لون النص'],['bg','خلفية الصفحة'],['card','خلفية البطاقات'],['muted','النص الثانوي']].map(([k, l]) => <div key={k} className="flex items-center justify-between"><span className="text-[12.5px] text-slate-500">{l}</span><input type="color" value={hex(S[k])||'#0ea5e9'} onChange={(e)=>setC(k, e.target.value)} className="h-8 w-12 rounded-lg border p-0.5" /></div>)}
+              {[['primary','اللون الأساسي'],['text','لون النص'],['bg','خلفية الصفحة'],['card','خلفية البطاقات'],['muted','النص الثانوي']].map(([k, l]) => <div key={k} className="flex items-center justify-between"><span className="text-[12.5px] text-slate-500">{l}</span><input type="color" value={hex((S as any)[k])||'#0ea5e9'} onChange={(e)=>setC(k, e.target.value)} className="h-8 w-12 rounded-lg border p-0.5" /></div>)}
             </div>
           </div>
         </>}
         {tab === 'colors' && <ColorsTab db={db} up={up} />}
         {tab === 'home' && <>
-          <Field label="الصفحة الرئيسية لـ /client"><Select2 value={S.homePageId || ''} onChange={(v) => up({ homePageId: v })} options={[{value:'',label:'— بدون'}, ...db.pages.map((p) => ({ value: p.id, label: p.name + (p.status==='published' ? '' : ' (غير منشورة)') }))]} /></Field>
+          <Field label="الصفحة الرئيسية لـ /client"><Select2 value={S.homePageId || ''} onChange={(v: string) => up({ homePageId: v })} options={[{value:'',label:'— بدون'}, ...db.pages.map((p) => ({ value: p.id, label: p.name + (p.status==='published' ? '' : ' (غير منشورة)') }))]} /></Field>
           <p className="rounded-xl bg-sky-50 p-3 text-[12px] text-sky-700">عند فتح /client بدون مسار تُعرض هذه الصفحة. الصفحات غير المنشورة لا تظهر.</p>
         </>}
         {tab === 'accounts' && <AccountsTab />}
@@ -109,13 +109,17 @@ function ColorsTab({ db, up }: { db: DB; up: (p: any) => void }) {
 function AccountsTab() {
   const store = useStore()
   const db = store.db
-  const [newH, setNewH] = useState(''); const [newC, setNewC] = useState(''); const [role, setRole] = useState('editor')
-  const add = () => { if (!newH.trim()) return; store.setDB({ ...db, settings: { ...db.settings, accounts: [...db.settings.accounts, { id: uid('acc'), handle: newH.trim(), code: newC || '1234', role }] } }); setNewH(''); setNewC('') }
+  const [newH, setNewH] = useState(''); const [newC, setNewC] = useState(''); const [role, setRole] = useState<Account['role']>('editor')
+  const add = () => {
+    if (!newH.trim()) return
+    store.updateDB((d) => ({ ...d, settings: { ...d.settings, accounts: [...d.settings.accounts, { id: uid('acc'), handle: newH.trim(), code: newC || '1234', role }] } }))
+    setNewH(''); setNewC('')
+  }
   return <div>
     <div className="rounded-2xl bg-white border p-3 space-y-2">
       <Field label="معرّف الحساب"><TextInput value={newH} onChange={(e: any) => setNewH(e.target.value)} placeholder="admin" /></Field>
       <Field label="رمز التحقق"><TextInput dir="ltr" value={newC} onChange={(e: any) => setNewC(e.target.value)} placeholder="1234" /></Field>
-      <Field label="الدور"><Seg value={role} onChange={setRole} options={[{value:'owner',label:'مالك'},{value:'editor',label:'محرر'},{value:'viewer',label:'عارض'}]} /></Field>
+      <Field label="الدور"><Seg value={role} onChange={(v) => setRole(v as Account['role'])} options={[{value:'owner',label:'مالك'},{value:'editor',label:'محرر'},{value:'viewer',label:'عارض'}]} /></Field>
       <button onClick={add} className="btn-primary w-full rounded-xl py-2.5 tap">+ إضافة حساب</button>
     </div>
     <div className="mt-3 space-y-2">{db.settings.accounts.map((a) => <div key={a.id} className="flex items-center gap-3 rounded-xl bg-white border p-3">
@@ -140,9 +144,8 @@ export function PublishScreen({ back }: { back: () => void }) {
   const chT: any = { add: 'إضافة', edit: 'تعديل', del: 'حذف' }
   const toggleSel = (k: string, id: string) => { const key = k + ':' + id; setSel((s) => (s.includes(key) ? s.filter((x) => x !== key) : [...s, key])) }
   const publishSel = () => {
-    const kSel = sel.map((x) => x.split(':')).filter(([k, id]) => db[k as keyof DB]).map(([k, id]) => { const e = (db as any)[k as any].find((x: any) => x.id === id); return { kind: k, id, name: e?.name || '', ch: 'edit' as const } })
-    store.notify({ type: 'info', text: `تم نشر ${kSel.length} عناصر محددة فقط (باقي التغييرات تبقى مسودة).` })
-    store.publish(`نشر ${kSel.length} عناصر محددة`)
+    // نشر جزئي حقيقي: تُنقل العناصر المحددة فقط إلى النسخة المنشورة
+    store.publishSelected(sel)
     setSel([])
   }
   return (
@@ -158,10 +161,11 @@ export function PublishScreen({ back }: { back: () => void }) {
           </div>)}</div>}
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <button onClick={() => setConfirmAll(true)} disabled={changes.length === 0} className="btn-primary rounded-xl py-3.5 font-bold disabled:opacity-40 tap">📤 نشر كل التغييرات</button>
-          <button onClick={() => setConfirmSel(true)} disabled={sel.length === 0} className="rounded-xl bg-white border py-3.5 font-semibold text-sky-700 disabled:opacity-40 tap">نشر المحدد ({sel.length})</button>
-          <button onClick={() => store.discardToPublished()} disabled={changes.length === 0} className="col-span-2 rounded-xl bg-white border py-3.5 font-semibold text-slate-500 disabled:opacity-40 tap">↩ تجاهل كل المسودات (عودة لآخر منشور)</button>
+          <button onClick={() => setConfirmAll(true)} disabled={changes.length === 0 || !store.canEdit} className="btn-primary rounded-xl py-3.5 font-bold disabled:opacity-40 tap">📤 نشر كل التغييرات</button>
+          <button onClick={() => setConfirmSel(true)} disabled={sel.length === 0 || !store.canEdit} className="rounded-xl bg-white border py-3.5 font-semibold text-sky-700 disabled:opacity-40 tap">نشر المحدد ({sel.length})</button>
+          <button onClick={() => store.discardToPublished()} disabled={changes.length === 0 || !store.canEdit} className="col-span-2 rounded-xl bg-white border py-3.5 font-semibold text-slate-500 disabled:opacity-40 tap">↩ تجاهل كل المسودات (عودة لآخر منشور)</button>
         </div>
+        {!store.canEdit && <p className="rounded-xl bg-amber-50 p-3 text-[12px] font-semibold text-amber-800 text-center">👁 دورك «عارض» — النشر والحفظ معطّلان.</p>}
         {broken.length > 0 && <p className="rounded-xl bg-rose-50 p-3 text-[12px] leading-relaxed text-rose-700">⚠ يوجد {broken.length} مرجع مكسور. يُنصح بإصلاحها قبل النشر أو ستعمل الإجراءات المكسورة معطّلة لدى العميل. <b onClick={() => window.dispatchEvent(new CustomEvent('cms:gobroken'))} className="underline">عرض القائمة</b></p>}
         <p className="rounded-xl bg-sky-50 p-3 text-[12px] text-sky-700">بعد النشر يظهر كل شيء فورًا على /client لدى عملائك. كل نشرة تُحفظ في السجل وتُتيح الاسترجاع.</p>
         <div className="rounded-2xl bg-white border overflow-hidden">
@@ -189,7 +193,7 @@ export function FlowsScreen({ back }: { back: () => void }) {
   const editing = db.flows.find((f) => f.id === editingId)
   return (
     <div className="flex h-full flex-col bg-sky-50/60">
-      <SubTopBar back={back} title="التدفقات والسلوكيات" right={<button onClick={() => { const e = store.addEntity('flows', {}); setEditingId(e.id) }} className="btn-primary flex h-10 items-center gap-1 rounded-xl px-3 tap"><Icon name="plus" size={15} />تدفق</button>} />
+      <SubTopBar back={back} title="التدفقات والسلوكيات" right={<button onClick={() => { const e = store.addEntity('flows', {}); if (e) setEditingId(e.id) }} className="btn-primary flex h-10 items-center gap-1 rounded-xl px-3 tap"><Icon name="plus" size={15} />تدفق</button>} />
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-6 pt-2">
         {db.flows.length === 0 && <Empty title="لا تدفقات بعد" desc="التدفق سلسلة إجراءات تُنفَّذ بالتتابع عند استدعائه من زر." />}
         {db.flows.map((f) => <div key={f.id} className="card-sky soft-sm p-3">
@@ -212,14 +216,17 @@ function FlowEditor({ id, onClose }: { id: string; onClose: () => void }) {
   const [name, setName] = useState(f.name)
   const [desc, setDesc] = useState(f.desc || '')
   const [addOpen, setAddOpen] = useState(false)
+  // حفظ الاسم/الوصف فور تغييرهما حتى لا يضيعا عند الإغلاق
+  const setNamePersist = (v: string) => { setName(v); store.updateEntity('flows', id, { name: v }) }
+  const setDescPersist = (v: string) => { setDesc(v); store.updateEntity('flows', id, { desc: v }) }
   const up = (steps: any[]) => store.updateEntity('flows', id, { name, desc, steps })
   const move = (i: number, dir: number) => { const a = f.steps.slice(); const j = i + dir; if (j < 0 || j >= a.length) return; const [x] = a.splice(i, 1); a.splice(j, 0, x); up(a) }
   const saveStep = (s: any) => { up([...f.steps, { id: uid('a'), ...s }]) }
   return (
     <Modal open onClose={onClose} title="محرر التدفق">
       <div className="space-y-3">
-        <Field label="الاسم"><TextInput value={name} onChange={(e: any) => setName(e.target.value)} /></Field>
-        <Field label="وصف"><TextInput value={desc} onChange={(e: any) => setDesc(e.target.value)} /></Field>
+        <Field label="الاسم"><TextInput value={name} onChange={(e: any) => setNamePersist(e.target.value)} /></Field>
+        <Field label="وصف"><TextInput value={desc} onChange={(e: any) => setDescPersist(e.target.value)} /></Field>
         <div className="text-[12px] font-bold text-slate-500">الخطوات ({f.steps.length})</div>
         <div className="space-y-1.5">{f.steps.map((s, i) => <div key={s.id} className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-sky-500 text-[10px] font-bold text-white">{i + 1}</span>
@@ -244,9 +251,9 @@ export function LibsScreen({ back, edit }: { back: () => void; edit: (id: string
   const [dl, setDl] = useState<string | null>(null)
   return (
     <div className="flex h-full flex-col bg-sky-50/60">
-      <SubTopBar back={back} title="مكتبة المكونات" right={<button onClick={() => { const e = store.addEntity('libs', { name: 'مكوّن مخصص' + (db.libs.length + 1) }); edit(e.id) }} className="btn-primary flex h-10 items-center gap-1 rounded-xl px-3 tap"><Icon name="plus" size={15} />مكوّن</button>} />
+      <SubTopBar back={back} title="مكتبة المكونات" right={<button onClick={() => { const e = store.addEntity('libs', { name: 'مكوّن مخصص' + (db.libs.length + 1) }); if (e) edit(e.id) }} className="btn-primary flex h-10 items-center gap-1 rounded-xl px-3 tap"><Icon name="plus" size={15} />مكوّن</button>} />
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-6 pt-2">
-        {db.libs.length === 0 && <Empty title="لا مكونات مخصصة بعد" desc="احفظ أي مكوّن (بأطفاله) كقالب قابل لإعادة الاستخدام، أو أنشئ واحدًا هنا." action={<button onClick={() => { const e = store.addEntity('libs', { name: 'مكوّن مخصص 1' }); edit(e.id) }} className="btn-primary rounded-xl px-5 py-3 tap">إنشاء أول مكوّن</button>} />}
+        {db.libs.length === 0 && <Empty title="لا مكونات مخصصة بعد" desc="احفظ أي مكوّن (بأطفاله) كقالب قابل لإعادة الاستخدام، أو أنشئ واحدًا هنا." action={<button onClick={() => { const e = store.addEntity('libs', { name: 'مكوّن مخصص 1' }); if (e) edit(e.id) }} className="btn-primary rounded-xl px-5 py-3 tap">إنشاء أول مكوّن</button>} />}
         {db.libs.map((l) => <div key={l.id} className="card-sky soft-sm p-3">
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-100 text-sky-600"><Icon name="layers" size={20} /></span>
@@ -275,7 +282,17 @@ export function MediaScreen({ back, backToHome }: { back: () => void; backToHome
   const fileRef = useRef<HTMLInputElement>(null)
   const [del, setDel] = useState<string | null>(null)
   const usedBy = (id: string) => { let c = 0; const scan = (n: any) => { for (const ch of n.children || []) { if (ch.mediaId === id) c++; scan(ch) } }; for (const p of db.pages) scan(p.root); for (const b of db.bars) scan(b.root); for (const po of db.popups) scan(po.root); return c }
-  const upload = (files: FileList | null) => { if (!files) return; Array.from(files).forEach((f) => { if (!f.type.startsWith('image/')) return store.toast('صورة فقط', 'err'); if (f.size > 1.4e6) return store.toast('كبير (1.4م.ب كحد)', 'err'); const rd = new FileReader(); rd.onload = () => store.setDB({ ...db, media: [...db.media, { id: uid('m'), name: f.name, type: 'image', mime: f.type, size: f.size, dataUrl: String(rd.result), at: Date.now() }] }); rd.readAsDataURL(f) }) }
+  const upload = (files: FileList | null) => {
+    if (!files) return
+    Array.from(files).forEach((f) => {
+      if (!f.type.startsWith('image/')) return store.toast('صورة فقط', 'err')
+      if (f.size > 1.4e6) return store.toast('كبير (1.4م.ب كحد)', 'err')
+      const rd = new FileReader()
+      // تحديث وظيفي: كل ملف يُضاف فوق أحدث حالة — لا يضيع أي ملف عند رفع عدة صور معًا
+      rd.onload = () => store.updateDB((d) => ({ ...d, media: [...d.media, { id: uid('m'), name: f.name, type: 'image', mime: f.type, size: f.size, dataUrl: String(rd.result), at: Date.now() }] }))
+      rd.readAsDataURL(f)
+    })
+  }
   return (
     <div className="flex h-full flex-col bg-sky-50/60">
       <SubTopBar back={back} title="مكتبة الوسائط" right={<button onClick={() => fileRef.current?.click()} className="btn-primary flex h-10 items-center gap-1 rounded-xl px-3 tap"><Icon name="plus" size={15} />رفع</button>} />
@@ -289,7 +306,7 @@ export function MediaScreen({ back, backToHome }: { back: () => void; backToHome
           </div>)}</div>
         )}
       </div>
-      <Confirm open={!!del} onClose={() => setDel(null)} onYes={() => { if (del) { store.setDB({ ...db, media: db.media.filter((m) => m.id !== del) }); store.toast('حُذف الوسيط — المكونات المستخدمة أصبحت عناصر نائبة', 'info') } setDel(null) }} danger title="حذف الوسيط؟" body="ستتحول المكوّنات التي تستخدمه إلى صورة نائبة." />
+      <Confirm open={!!del} onClose={() => setDel(null)} onYes={() => { if (del) { store.updateDB((d) => ({ ...d, media: d.media.filter((m) => m.id !== del) })); store.toast('حُذف الوسيط — المكونات المستخدمة أصبحت عناصر نائبة', 'info') } setDel(null) }} danger title="حذف الوسيط؟" body="ستتحول المكوّنات التي تستخدمه إلى صورة نائبة." />
     </div>
   )
 }
@@ -301,15 +318,37 @@ export function BrokenScreen({ back, openRef }: { back: () => void; openRef: (ki
   const items = findBroken(db)
   const [filter, setFilter] = useState('all')
   const [confirmId, setConfirmId] = useState<string | null>(null)
-  const filtered = filter === 'all' ? items : items.filter((i) => (i.what.includes('وسيط') ? 'media' : 'action') === filter)
+  const filtered = filter === 'all' ? items : items.filter((i) => (i.bkind === 'media' ? 'media' : 'action') === filter)
+  // يطبّق دالة على جذر كيان داخل نسخة db (تحديث وظيفي آمن)
+  const withRoot = (d: DB, entityKind: string, entityId: string, fn: (root: Node) => Node): DB => {
+    const arr = (d as any)[entityKind] as any[]
+    return { ...d, [entityKind]: arr.map((e) => (e.id === entityId && e.root ? { ...e, root: fn(e.root) } : e)) } as DB
+  }
   const fixDrop = (it: BrokenItem) => {
+    if (it.entityKind === 'flows') {
+      // حذف الخطوة المكسورة من التدفق
+      if (!it.actionId) return
+      store.updateDB((d) => ({ ...d, flows: d.flows.map((f) => (f.id === it.entityId ? { ...f, steps: f.steps.filter((s) => s.id !== it.actionId) } : f)) }))
+      store.notify({ type: 'success', text: `حُذفت الخطوة المكسورة من تدفق «${it.entityLabel}».` })
+      store.toast('تم حذف الخطوة المكسورة', 'ok')
+      return
+    }
+    if (it.bkind === 'media') {
+      // فصل الوسيط المفقود عن مكوّن الصورة (يعود للصورة النائبة)
+      store.updateDB((d) => withRoot(d, it.entityKind, it.entityId, (root) => dropBrokenMedia(root, it.nodeId)))
+      store.notify({ type: 'success', text: `فُصل الوسيط المفقود عن «${it.nodeName}».` })
+      store.toast('تم فصل الوسيط المفقود', 'ok')
+      return
+    }
+    if (it.bkind === 'cond') {
+      store.updateDB((d) => withRoot(d, it.entityKind, it.entityId, (root) => dropBrokenCond(root, it.nodeId)))
+      store.notify({ type: 'success', text: `حُذف شرط الظهور المكسور من «${it.nodeName}».` })
+      store.toast('تم حذف الشرط المكسور', 'ok')
+      return
+    }
     // إزالة الإجراء المكسور من المصدر
-    if (!it.actionId) { store.setDB(db); return }
-    const entity = (db[it.entityKind] as any[]).find((e) => e.id === it.entityId)
-    if (!entity) return
-    const arr = (db[it.entityKind] as any[])
-    const next = arr.map((e) => (e.id === it.entityId ? { ...e, root: dropBrokenAction(e.root, it.nodeId, it.actionId as string) } : e))
-    store.setDB({ ...db, [it.entityKind]: next })
+    if (!it.actionId) return
+    store.updateDB((d) => withRoot(d, it.entityKind, it.entityId, (root) => dropBrokenAction(root, it.nodeId, it.actionId as string)))
     store.notify({ type: 'success', text: `حُذف الإجراء المكسور من «${it.nodeName}».` })
     store.toast('تم حذف الإجراء المكسور', 'ok')
   }
@@ -325,12 +364,12 @@ export function BrokenScreen({ back, openRef }: { back: () => void; openRef: (ki
               <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-500"><Icon name="link" size={16} /></span>
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] font-semibold text-rose-700">{it.what}</div>
-                <div className="mt-0.5 text-[11.5px] text-slate-500">المصدر: <b>{it.nodeName}</b> ضمن {it.entityKind === 'pages' ? 'صفحة' : it.entityKind === 'bars' ? 'شريط' : 'نافذة'} «{it.entityLabel}»</div>
+                <div className="mt-0.5 text-[11.5px] text-slate-500">المصدر: <b>{it.nodeName}</b> ضمن {it.entityKind === 'pages' ? 'صفحة' : it.entityKind === 'bars' ? 'شريط' : it.entityKind === 'flows' ? 'تدفق' : 'نافذة'} «{it.entityLabel}»</div>
               </div>
             </div>
             <div className="mt-2.5 flex gap-2 border-t border-slate-50 pt-2">
-              <button onClick={() => openRef(it.entityKind, it.entityId, it.nodeId)} className="flex-1 rounded-lg bg-sky-50 py-2 text-[12.5px] font-semibold text-sky-700 tap">انتقال للمكوّن المصدر</button>
-              <button onClick={() => setConfirmId(it.id)} className="rounded-lg bg-rose-50 px-3 py-2 text-[12px] text-rose-600 tap">حذف المكسور</button>
+              {it.entityKind !== 'flows' && <button onClick={() => openRef(it.entityKind, it.entityId, it.nodeId)} className="flex-1 rounded-lg bg-sky-50 py-2 text-[12.5px] font-semibold text-sky-700 tap">انتقال للمكوّن المصدر</button>}
+              <button onClick={() => setConfirmId(it.id)} className={it.entityKind !== 'flows' ? 'rounded-lg bg-rose-50 px-3 py-2 text-[12px] text-rose-600 tap' : 'flex-1 rounded-lg bg-rose-50 px-3 py-2 text-[12px] text-rose-600 tap'}>حذف المكسور</button>
             </div>
           </div>
         ))}
