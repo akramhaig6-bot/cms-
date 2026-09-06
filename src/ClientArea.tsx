@@ -10,8 +10,7 @@ export default function ClientArea() {
   const [updateMsg, setUpdateMsg] = useState(false)
   const firstPub = useRef(true)
   let path = loc.pathname.replace(/^\/client/, '')
-  if (loc.pathname === '/client') path = '/'
-  if (loc.search) path += loc.search
+  if (!path) path = '/'
   const published = store.published
 
   // هيكل عظمي أثناء التحميل/الانتقال (محاكاة تحميل تدريجي)
@@ -35,7 +34,7 @@ export default function ClientArea() {
       <Site doc={published} initialPath={path} isolated={false} />
       {updateMsg && (
         <div className="toast-enter" style={{ position: 'fixed', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 400, maxWidth: '92%' }}>
-          <button onClick={() => setUpdateMsg(false)} className="flex items-center gap-2 rounded-full bg-sky-600 px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-lg tap">
+          <button onClick={() => window.location.reload()} className="flex items-center gap-2 rounded-full bg-sky-600 px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-lg tap">
             🔄 تم تحديث الموقع — اضغط للتحديث
           </button>
         </div>

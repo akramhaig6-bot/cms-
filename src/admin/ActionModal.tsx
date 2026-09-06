@@ -27,21 +27,23 @@ const TYPES: { t: ActionType; label: string; group: string }[] = [
 export function ActionModal({ open, onClose, doc, initial, onSave }: {
   open: boolean; onClose: () => void; doc: DB; initial?: Action | null; onSave: (a: Action) => void
 }) {
+  const initT = initial?.target
   const [type, setType] = useState<ActionType>(initial?.type || 'nav')
-  const [targetKind, setTargetKind] = useState(initial?.target?.kind || 'page')
-  const [pageId, setPageId] = useState(initial?.target?.kind === 'page' ? initial.target.id : '')
-  const [popupId, setPopupId] = useState(initial?.target?.kind === 'popup' ? initial.target.id : '')
-  const [barId, setBarId] = useState(initial?.target?.kind === 'bar' ? initial.target.id : '')
-  const [flowId, setFlowId] = useState(initial?.target?.kind === 'flow' ? initial.target.id : '')
-  const [nodePick, setNodePick] = useState<{ id: string; label: string } | null>(initial && (initial.type === 'show' || initial.type === 'hide' || initial.type === 'toggle') ? { id: initial.target?.id || '', label: initial.target?.label || '' } : null)
+  const [targetKind, setTargetKind] = useState(initT?.kind || 'page')
+  const [pageId, setPageId] = useState(initT?.kind === 'page' ? initT.id || '' : '')
+  const [popupId, setPopupId] = useState(initT?.kind === 'popup' ? initT.id || '' : '')
+  const [barId, setBarId] = useState(initT?.kind === 'bar' ? initT.id || '' : '')
+  const [flowId, setFlowId] = useState(initT?.kind === 'flow' ? initT.id || '' : '')
+  const [nodePick, setNodePick] = useState<{ id: string; label: string } | null>(initial && (initial.type === 'show' || initial.type === 'hide' || initial.type === 'toggle') ? { id: initT?.id || '', label: initT?.label || '' } : null)
   const [showNode, setShowNode] = useState<{ id: string; label: string } | null>(initial?.showId ? { id: initial.showId, label: 'مكوّن' } : null)
   const [hideNode, setHideNode] = useState<{ id: string; label: string } | null>(initial?.hideId ? { id: initial.hideId, label: 'مكوّن' } : null)
-  const [url, setUrl] = useState(initial?.type === 'openLink' ? initial.target?.id || '' : '')
-  const [varId, setVarId] = useState(initial?.target?.kind === 'var' ? initial.target.id : '')
-  const [varVal, setVarVal] = useState(initial?.target?.kind === 'var' ? (initial.target.label || '') : '')
+  const [url, setUrl] = useState(initial?.type === 'openLink' ? initT?.id || '' : '')
+  const [varId, setVarId] = useState(initT?.kind === 'var' ? initT.id || '' : '')
+  const [varVal, setVarVal] = useState(initT?.kind === 'var' ? (initT.label || '') : '')
   const [delay, setDelay] = useState(initial?.delay || 0)
+  const [err, setErr] = useState('')
 
-  const setT = (t: ActionType) => { setType(t) }
+  const setT = (t: ActionType) => { setType(t); setErr('') }
   const needsNode = ['show', 'hide', 'toggle'].includes(type)
   const needsPage = type === 'nav'
   const needsPopup = type === 'openPopup' || type === 'closePopup'
@@ -50,6 +52,17 @@ export function ActionModal({ open, onClose, doc, initial, onSave }: {
   const needsVar = ['setVar', 'incVar', 'toggleVar'].includes(type)
 
   const save = () => {
+    // تحقق من اكتمال الهدف قبل الحفظ — يمنع إنشاء مراجع مكسورة
+    if (needsPage && !pageId) return setErr('اختر الصفحة الهدف أولًا')
+    if (needsPopup && type === 'openPopup' && !popupId) return setErr('اختر النافذة التي ستُفتح')
+    if (needsBar && !barId) return setErr('اختر الشريط الهدف')
+    if (needsFlow && !flowId) return setErr('اختر التدفق الذي سيُشغَّل')
+    if (needsNode && !nodePick) return setErr('اختر المكوّن الهدف')
+    if (type === 'showAndHide' && !showNode && !hideNode) return setErr('اختر مكوّنًا واحدًا على الأقل (الذي يظهر أو الذي يُخفى)')
+    if (type === 'openLink' && !url.trim()) return setErr('أدخل الرابط الخارجي')
+    if (needsVar && !varId) return setErr('اختر المتغير')
+    if (type === 'setVar' && varId && !varVal.trim() && doc.variables.find((v) => v.id === varId)?.vtype !== 'bool') return setErr('أدخل القيمة الجديدة للمتغير')
+    setErr('')
     let target: Action['target']
     if (needsPage) target = { kind: 'page', id: pageId, label: doc.pages.find((p) => p.id === pageId)?.name }
     else if (needsPopup) target = type === 'openPopup' || type === 'closePopup' ? { kind: 'popup', id: popupId, label: doc.popups.find((p) => p.id === popupId)?.name } : undefined
@@ -57,7 +70,7 @@ export function ActionModal({ open, onClose, doc, initial, onSave }: {
     else if (needsFlow) target = { kind: 'flow', id: flowId, label: doc.flows.find((f) => f.id === flowId)?.name }
     else if (needsNode) target = nodePick ? { kind: 'node', id: nodePick.id, label: nodePick.label } : undefined
     else if (type === 'openLink') target = { kind: 'url', id: url, label: url }
-    else if (needsVar) { const v = doc.variables.find((x) => x.id === varId); target = { kind: 'var', id: varId, label: type === 'incVar' ? (varVal || '1') : (type === 'toggleVar' ? '' : varVal) } }
+    else if (needsVar) { target = { kind: 'var', id: varId, label: type === 'incVar' ? (varVal || '1') : (type === 'toggleVar' ? '' : varVal) } }
     const a: Action = { id: initial?.id || ('a' + Math.random().toString(36).slice(2, 8)), type, target, delay: delay || undefined, showId: type === 'showAndHide' ? showNode?.id : undefined, hideId: type === 'showAndHide' ? hideNode?.id : undefined }
     onSave(a); onClose()
   }
@@ -92,6 +105,7 @@ export function ActionModal({ open, onClose, doc, initial, onSave }: {
         </>}
         {type === 'openLink' && <Field label="الرابط الخارجي"><TextInput dir="ltr" value={url} onChange={(e: any) => setUrl(e.target.value)} placeholder="https://…" /></Field>}
         <Field label="تأخير (بالثواني)"><TextInput type="number" value={delay} onChange={(e: any) => setDelay(Number(e.target.value) || 0)} /></Field>
+        {err && <div className="rounded-xl bg-rose-50 p-2.5 text-center text-[12.5px] text-rose-600">{err}</div>}
         <div className="grid grid-cols-2 gap-2 pt-2">
           <button onClick={onClose} className="rounded-xl bg-slate-100 py-3 font-semibold text-slate-600 tap">إلغاء</button>
           <button onClick={save} className="btn-primary rounded-xl py-3 font-semibold tap">حفظ الإجراء</button>

@@ -70,11 +70,11 @@ export function ProgressStatic({ node }: { node: Node }) {
   const s = node.style || {}
   const fill = node.progress?.color || s.color || '#0ea5e9'
   const dur = node.progress?.duration || 2000
-  const start = node.progress?.start || 'auto'
-  const pct = node.style?.opacity ?? 1
+  const auto = (node.progress?.start || 'auto') === 'auto'
   return (
-    <div style={{ width:'100%', background: s.bg || '#e2e8f0', borderRadius: 999, height: s.heightPx || 8, overflow:'hidden', position:'relative' }} data-progress="1">
-      <div data-pct={pct} data-dur={dur} data-start={start} style={{ height:'100%', width:'0%', background: fill, borderRadius: 999, transition: `width ${dur}ms linear` }} />
+    <div style={{ width: '100%', background: s.bg || '#e2e8f0', borderRadius: 999, height: s.heightPx || 8, overflow: 'hidden' }}>
+      {/* يبدأ من 0 ويمتلئ خلال المدة — يعمل بلا أي كود خارجي */}
+      <div style={{ height: '100%', width: '100%', background: fill, borderRadius: 999, animation: auto ? `pgrow ${dur}ms linear both` : undefined, opacity: auto ? undefined : 1 }} />
     </div>
   )
 }

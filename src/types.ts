@@ -50,7 +50,7 @@ export type ActionType =
   | 'setVar' | 'incVar' | 'toggleVar'
 
 export interface ActionTarget {
-  kind: 'page' | 'bar' | 'popup' | 'node' | 'flow' | 'url'
+  kind: 'page' | 'bar' | 'popup' | 'node' | 'flow' | 'url' | 'var'
   id?: string
   label?: string
   broken?: boolean

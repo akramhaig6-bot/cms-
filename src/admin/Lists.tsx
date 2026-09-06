@@ -23,6 +23,7 @@ export function PagesList({ back, openEditor }: { back: () => void; openEditor: 
   const createPage = (name: string, path: string) => {
     if (db.pages.some((p) => p.path === path)) { store.toast('هذا المسار مستخدم بالفعل', 'err'); return false }
     const e = store.addEntity('pages', { name, path, title: name, status: 'published' })
+    if (!e) return false
     openEditor(e.id); return true
   }
 
@@ -142,7 +143,7 @@ function CreateBarSheet({ open, onClose, onCreate }: { open: boolean; onClose: (
   const [scope, setScope] = useState('all')
   const save = () => {
     const e = store.addEntity('bars', { name, type, mode, foldable, defaultFolded: false, scope: scope === 'all' ? 'all' : [], hidden: false })
-    onCreate(e)
+    if (e) onCreate(e)
   }
   return (
     <Modal open={open} onClose={onClose} title="شريط جديد">
@@ -165,7 +166,7 @@ export function PopupsList({ back, openEditor }: { back: () => void; openEditor:
   const store = useStore()
   const db = store.db
   const [delId, setDelId] = useState<string | null>(null)
-  const newOne = () => { const e = store.addEntity('popups', {}); openEditor(e.id) }
+  const newOne = () => { const e = store.addEntity('popups', {}); if (e) openEditor(e.id) }
   return (
     <div className="flex h-full flex-col bg-sky-50/50">
       <SubTopBar back={back} title="النوافذ المنبثقة" right={<button onClick={newOne} className="btn-primary flex h-10 items-center gap-1 rounded-xl px-3 tap"><Icon name="plus" size={16} />نافذة</button>} />

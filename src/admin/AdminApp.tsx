@@ -20,9 +20,10 @@ export default function AdminApp() {
 
 function Login() {
   const store = useStore()
-  const [mode, setMode] = useState<'login' | 'recover'>('login')
+  const [mode, setMode] = useState<'login' | 'recover' | 'recover2'>('login')
   const [handle, setHandle] = useState('')
   const [code, setCode] = useState('')
+  const [recCode, setRecCode] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const submit = () => {
@@ -41,7 +42,7 @@ function Login() {
     const id = uid('rec')
     localStorage.setItem('cms_pending_' + handle.trim(), id)
     store.notify({ type: 'recover', text: `طلب استعادة صلاحية دخول للحساب «${handle.trim()}».`, ref: { kind: 'recover', id, label: handle.trim() } })
-    setErr(''); setMode('recover2')
+    setErr(''); setMode('recover2'); setRecCode(''); setCode('')
   }
   // استلام رمز من المالك وتثبيت رمز جديد
   const applyRecovery = () => {
@@ -49,15 +50,17 @@ function Login() {
     if (!pending) { setErr('لا يوجد طلب استعادة نشط لهذا الحساب'); return }
     const ownerGrants = JSON.parse(localStorage.getItem('cms_recovery_codes') || '{}') as any
     const granted = ownerGrants[handle.trim()]
-    if (!granted || granted.id !== pending) { setErr('الرمز غير صحيح أو منتهي'); return }
+    // تحقق فعلي من رمز التفعيل المولَّد عند قبول المالك
+    if (!granted || granted.id !== pending || String(granted.code) !== recCode.trim()) { setErr('الرمز غير صحيح أو منتهي'); return }
     if (!code.trim()) { setErr('أدخل رمز دخول جديد'); return }
-    const db = store.db
-    const accounts = db.settings.accounts.map((a) => (a.handle === handle.trim() ? { ...a, code: code.trim() } : a))
-    store.setDB({ ...db, settings: { ...db.settings, accounts } })
+    store.updateDB((d) => ({ ...d, settings: { ...d.settings, accounts: d.settings.accounts.map((a) => (a.handle === handle.trim() ? { ...a, code: code.trim() } : a)) } }))
     localStorage.removeItem('cms_pending_' + handle.trim())
-    localStorage.removeItem('cms_recovery_codes')
+    // حذف رمز هذا الحساب فقط — لا تُمسح رموز الحسابات الأخرى
+    const codes = JSON.parse(localStorage.getItem('cms_recovery_codes') || '{}') as any
+    delete codes[handle.trim()]
+    localStorage.setItem('cms_recovery_codes', JSON.stringify(codes))
     store.toast('تم تعيين الرمز الجديد — سجّل الدخول الآن', 'ok')
-    setMode('login'); setCode('')
+    setMode('login'); setCode(''); setRecCode('')
   }
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-b from-sky-100 to-sky-50 px-6">
@@ -69,8 +72,11 @@ function Login() {
           <div className="mb-3 flex items-center justify-center gap-2 rounded-xl bg-emerald-50 py-2 text-[11.5px] text-emerald-700"><span className="h-2 w-2 rounded-full bg-emerald-500" /> متصل بنظام المحتوى</div>
           <div className="space-y-3">
             <Field label="معرّف الدخول"><TextInput value={handle} onChange={(e: any) => setHandle(e.target.value)} placeholder="admin" dir="ltr" /></Field>
-            <Field label={mode === 'recover2' ? 'رمز الاستعادة ثم رمز الدخول الجديد' : 'رمز التحقق'}>
-              <TextInput type={mode === 'recover2' ? 'text' : 'password'} value={code} onChange={(e: any) => setCode(e.target.value)} placeholder={mode === 'recover2' ? 'استلم الرمز من المالك…' : '••••'} dir="ltr" />
+            {mode === 'recover2' && (
+              <Field label="رمز الاستعادة (من المالك)"><TextInput value={recCode} onChange={(e: any) => setRecCode(e.target.value)} placeholder="RC······" dir="ltr" /></Field>
+            )}
+            <Field label={mode === 'recover2' ? 'رمز الدخول الجديد' : 'رمز التحقق'}>
+              <TextInput type={mode === 'login' ? 'password' : 'text'} value={code} onChange={(e: any) => setCode(e.target.value)} placeholder={mode === 'recover2' ? 'الرمز الجديد…' : '••••'} dir="ltr" />
             </Field>
             {err && <div className="rounded-xl bg-rose-50 p-2.5 text-center text-[12.5px] text-rose-600">{err}</div>}
             <button onClick={mode === 'recover' ? requestRecovery : mode === 'recover2' ? applyRecovery : submit} disabled={busy} className="btn-primary flex h-12 w-full items-center justify-center gap-2 rounded-xl text-[15px] font-bold tap disabled:opacity-70">
@@ -100,7 +106,7 @@ function Shell() {
   const go = (v: string) => {
     setDrawer(false); setAutoFocus(null)
     if (v.startsWith('edit:')) { const [, id, k] = v.split(':'); setView({ editor: { kind: k as EditKind, id } }); return }
-    if (v === 'newpage') { const e = store.addEntity('pages', {}); setView({ editor: { kind: 'pages', id: e.id } }); return }
+    if (v === 'newpage') { const e = store.addEntity('pages', {}); if (e) setView({ editor: { kind: 'pages', id: e.id } }); return }
     if (['dashboard','pages','bars','popups','media','flows','settings','publish','preview','libs','broken'].includes(v)) setView(v as any)
   }
   const openRef = (kind: EditKind, id: string, nodeId: string) => { setAutoFocus(nodeId); setView({ editor: { kind, id } }); setDrawer(false) }
@@ -242,8 +248,9 @@ function Notifications({ open, onClose, go }: { open: boolean; onClose: () => vo
             {n.type === 'recover' && n.ref?.kind === 'recover' && (
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <button onClick={() => {
-                  const handle = n.ref.label || ''
-                  const id = n.ref.id || ''
+                  const handle = n.ref?.label || ''
+                  const id = n.ref?.id || ''
+                  if (!handle || !id) { store.removeNotif(n.id); return }
                   const code = 'RC' + Math.floor(100000 + Math.random() * 899999)
                   const codes = JSON.parse(localStorage.getItem('cms_recovery_codes') || '{}')
                   codes[handle] = { id, code }
