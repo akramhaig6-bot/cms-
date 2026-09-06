@@ -124,6 +124,7 @@ export interface Page {
   seoImage?: string
   status: 'published'|'draft'|'hidden'
   updatedAt: number
+  lockedBy?: string
   root: Node
 }
 
@@ -139,6 +140,7 @@ export interface Bar {
   defaultFolded: boolean
   hidden: boolean
   updatedAt: number
+  lockedBy?: string
   root: Node
 }
 
@@ -149,6 +151,7 @@ export interface Popup {
   closeMode: 'outside'|'button'|'both'
   openAnim?: string
   updatedAt: number
+  lockedBy?: string
   root: Node
 }
 
@@ -176,6 +179,7 @@ export interface Lib {
   desc?: string
   root: Node   // نسخة من الشجرة تُدرج عند الاستخدام
   updatedAt: number
+  lockedBy?: string
 }
 
 export interface Variable {
