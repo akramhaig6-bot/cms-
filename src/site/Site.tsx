@@ -58,6 +58,27 @@ export default function Site({ doc, initialPath = '/', isolated = false }: Props
   const viewRef = useRef(view); viewRef.current = view
   const histRef = useRef<string[]>([])
 
+  // سلوك الروابط العميقة (Deep Links)
+  useEffect(() => {
+    if (isolated) return
+    const handleHash = () => {
+      const hash = window.location.hash.slice(1)
+      if (!hash || !engRef.current) return
+      const targetId = hash
+      const p = engRef.current.doc.popups.find(x => x.id === targetId)
+      if (p) {
+        engRef.current.openPopup(targetId)
+        return
+      }
+      engRef.current.show(targetId)
+      const el = document.getElementById('node-' + targetId)
+      if (el) el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' })
+    }
+    handleHash()
+    window.addEventListener('hashchange', handleHash)
+    return () => window.removeEventListener('hashchange', handleHash)
+  }, [isolated, reduceMotion])
+
   const showToast = useCallback((msg: string, type: 'ok' | 'err' | 'info' = 'info') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 2400)
   }, [])

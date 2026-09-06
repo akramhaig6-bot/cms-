@@ -46,6 +46,18 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFocusId])
 
+  useEffect(() => {
+    if (!readOnly && !meta.lockedBy && store.session.accountId) {
+      store.updateEntity(kind, id, { lockedBy: store.session.accountId })
+    }
+    return () => {
+      if (!readOnly && store.session.accountId) {
+        // Unlock on unmount
+        store.updateEntity(kind, id, { lockedBy: undefined })
+      }
+    }
+  }, [id])
+
   // تفعيل open media & add action من لوحة الخصائص
   useEffect(() => {
     const om = () => setMediaOpen(true)
@@ -66,16 +78,18 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
 
   const meta = entity as any
   const mediaArr = db.media
+  const isLocked = meta.lockedBy && meta.lockedBy !== store.session.accountId
+  const effectiveReadOnly = readOnly || isLocked
 
   const patch = (newRoot: Node) => store.patchRoot(kind, id, () => newRoot)
 
   // --- تعديل عقدة ---
-  const changeNode = (n: Node) => { if (readOnly) return store.toast('أنت في وضع القراءة فقط', 'err'); patch(updateNode(root, n.id, () => n)) }
+  const changeNode = (n: Node) => { if (effectiveReadOnly) return store.toast(isLocked ? 'هذا العنصر مقفل للتحرير من مستخدم آخر' : 'أنت في وضع القراءة فقط', 'err'); patch(updateNode(root, n.id, () => n)) }
 
   // --- إضافة مكوّن ---
   const doAdd = (type: NType, into?: string | null) => {
     if (!root) return
-    if (readOnly) { store.toast('وضع القراءة فقط — لا يمكن الإضافة', 'err'); setAddSheet(false); setPickerOpen(null); return }
+    if (effectiveReadOnly) { store.toast(isLocked ? 'مقفل' : 'وضع القراءة فقط', 'err'); setAddSheet(false); setPickerOpen(null); return }
     let containerId = root.id
     let index = -1
     if (into === 'root') { containerId = root.id }
