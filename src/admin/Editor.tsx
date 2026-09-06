@@ -35,6 +35,7 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
   const [confirmLeafAdd, setConfirmLeafAdd] = useState<null | { type: NType }>(null)
   const [addSheet, setAddSheet] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
+  const [cfgOpen, setCfgOpen] = useState(false)
 
   const root = entity?.root as Node | undefined
   const readOnly = store.session.role === 'viewer'
@@ -177,6 +178,7 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
         <SaveBadge />
         <button onClick={() => store.undo()} disabled={store.undoDepth === 0} className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 tap hover:bg-sky-100 disabled:opacity-25" title="تراجع"><Icon name="undo" size={18} /></button>
         <button onClick={() => store.redo()} disabled={store.redoDepth === 0} className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 tap hover:bg-sky-100 disabled:opacity-25" title="إعادة"><Icon name="redo" size={18} /></button>
+        {(kind === 'bars' || kind === 'popups') && <button onClick={() => setCfgOpen(true)} className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 tap hover:bg-sky-100" title="إعدادات {entityKindLabel(kind)}"><Icon name="settings" size={18} /></button>}
         <button onClick={onPreview} className="flex h-10 w-10 items-center justify-center rounded-xl text-sky-700 tap hover:bg-sky-100" title="معاينة"><Icon name="eye" size={19} /></button>
         {kind !== 'libs' && !readOnly && <button onClick={() => { store.notify({ type: 'success', text: `تم نشر «${meta.name}» ${entityKindLabel(kind)}.` }); store.publish(`نشر ${entityKindLabel(kind)}: ${meta.name}`); store.toast('تم النشر', 'ok') }} className="flex h-10 items-center gap-1 rounded-xl bg-sky-500 px-3 text-[12.5px] font-bold text-white tap"><Icon name="send" size={15} /> نشر</button>}
         <button onClick={() => setTreeOpen(true)} className="flex h-10 w-10 items-center justify-center rounded-xl text-sky-700 tap hover:bg-sky-100"><Icon name="layers" size={18} /></button>
@@ -231,9 +233,10 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
 
       {/* قائمة اختيار المكوّن */}
       <AddSheet
-        open={pickerOpen === 'root' || addSheet}
+        open={addSheet}
+        into={pickerOpen === 'after' ? 'after' : pickerOpen === 'root' ? 'root' : pickerOpen}
         onClose={() => { setAddSheet(false); setPickerOpen(null) }}
-        onPick={(t) => doAdd(t, 'root')}
+        onPick={(t) => doAdd(t, pickerOpen === 'after' ? 'after' : pickerOpen === 'root' ? 'root' : pickerOpen)}
       />
 
       {/* شجرة المكونات */}
@@ -254,6 +257,9 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
       <Modal open={renameOpen} onClose={() => setRenameOpen(false)} title="إعدادات الكيان">
         <RenameForm entity={entity} kind={kind} db={db} onDone={() => setRenameOpen(false)} />
       </Modal>
+
+      {/* إعدادات الشريط / النافذة */}
+      {kind !== 'pages' && kind !== 'libs' && <EntityConfig kind={kind} entity={entity} db={db} open={cfgOpen} onClose={() => setCfgOpen(false)} />}
     </div>
   )
 
@@ -269,12 +275,22 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
       if (node.style?.widthMode === 'px') style.width = node.style.widthPx + 'px'
       style.outline = isSel ? '2px solid #38bdf8' : undefined
       style.outlineOffset = isSel ? 1 : undefined
-      const dir = containerDirection(node)
+      const isGrid = node.type === 'grid'
+      const vertish = isContainer(node.type) && !isGrid && (containerDirection(node) === 'vertical' || node.type === 'section' || node.type === 'card' || node.type === 'container')
       return (
         <div key={node.id} style={style}
           onClick={(e) => { e.stopPropagation(); setSelectedId(node.id) }}>
           {node.children?.map((c) => renderEdNode(c, depth + 1))}
-          {cnt === 0 && <div className="rounded-lg border border-dashed border-sky-200 py-3 text-center text-[11px] text-sky-300">حاوية فارغة — اضغط إضافة داخل</div>}
+          {cnt === 0 && !readOnly && (
+            <button onClick={(e) => { e.stopPropagation(); openInto(node.id) }} className="my-1 flex items-center justify-center gap-1 rounded-lg border border-dashed border-sky-300 py-2 text-[11px] font-semibold text-sky-500 tap">
+              <Icon name="plus" size={13} /> إضافة داخل هذه الحاوية
+            </button>
+          )}
+          {isSel && vertish && !readOnly && cnt > 0 && (
+            <button onClick={(e) => { e.stopPropagation(); openInto(node.id) }} className="my-1 flex w-full items-center justify-center gap-1 rounded-lg bg-sky-50/70 py-1 text-[10.5px] font-semibold text-sky-400 tap">
+              <Icon name="plus" size={11} /> داخل
+            </button>
+          )}
           {hidden && <HiddenTag name={node.name} onClick={() => setSelectedId(node.id)} />}
           {isSel && <SelTag name={node.name} />}
         </div>
@@ -298,12 +314,9 @@ export default function Editor({ kind, id, onExit, onPreview, autoFocusId }: Pro
 
   function openAddFor(n: Node) {
     if (isContainer(n.type)) { setPickerOpen(n.id); setAddSheet(true) }
-    else {
-      setConfirmLeafAdd({ type: 'x' as NType })
-      // اقتراح إضافة كأخ
-      setAddSheet(true); setPickerOpen('after')
-    }
+    else { setPickerOpen('after'); setAddSheet(true) }
   }
+  function openInto(containerId: string) { setPickerOpen(containerId); setAddSheet(true) }
 }
 
 function cloneNode(n: Node | null): Node { return JSON.parse(JSON.stringify(n)) }
@@ -334,7 +347,7 @@ function SaveBadge() {
   return <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-500"><span className="h-2 w-2 rounded-full" style={{ background: m.c }} />{m.t}</span>
 }
 
-function AddSheet({ open, onClose, onPick }: { open: boolean; onClose: () => void; onPick: (t: NType) => void }) {
+function AddSheet({ open, into, onClose, onPick }: { open: boolean; into?: string | null; onClose: () => void; onPick: (t: NType) => void }) {
   const [q, setQ] = useState('')
   const items = [...LEAF_META, ...CONTAINER_META].filter((x) => x.label.includes(q) || x.desc.includes(q))
   return (
@@ -437,4 +450,58 @@ export function MediaPicker({ open, onClose, onPick }: { open: boolean; onClose:
 
 function hasRefs(n: Node): boolean {
   return !!((n.events?.click && n.events.click.length))
+}
+
+// إعدادات كيانات الشريط والنافذة (نوع، سلوك طي، نطاق، حجم، إغلاق…)
+function EntityConfig({ kind, entity, db, open, onClose }: { kind: EditKind; entity: any; db: DB; open: boolean; onClose: () => void }) {
+  const store = useStore()
+  if (kind === 'bars') {
+    const b = entity
+    const scopeAll = b.scope === 'all'
+    const up = (patch: any) => { store.updateEntity('bars', b.id, patch); store.toast('حُفظت إعدادات الشريط', 'ok') }
+    const scopePages = Array.isArray(b.scope) ? b.scope : []
+    return (
+      <BottomSheet open={open} onClose={onClose} title="إعدادات الشريط" full>
+        <div className="space-y-3 pb-6">
+          <Field label="الاسم"><TextInput value={b.name} onChange={(e: any) => up({ name: e.target.value })} /></Field>
+          <Field label="النوع"><Seg value={b.type} onChange={(v) => up({ type: v })} options={[{value:'top',label:'علوي'},{value:'bottom',label:'سفلي'},{value:'nav',label:'تنقل'}]} /></Field>
+          <Field label="ثبات / سلوك التمرير"><Seg value={b.mode || 'fixed'} onChange={(v) => up({ mode: v })} options={[{value:'fixed',label:'ثابت دائمًا'},{value:'scroll',label:'يختبئ بالتمرير'}]} /></Field>
+          <Field label="قابل للطي"><Toggle on={!!b.foldable} onChange={(v) => up({ foldable: v, defaultFolded: v ? b.defaultFolded : false })} /></Field>
+          {b.foldable && <Field label="الحالة الافتراضية (عند فتح /client)"><Seg value={b.defaultFolded ? 'folded' : 'open'} onChange={(v) => up({ defaultFolded: v === 'folded' })} options={[{value:'open',label:'مفتوح'},{value:'folded',label:'مطوي'}]} /></Field>}
+          <Field label="نطاق الظهور">
+            <Seg value={scopeAll ? 'all' : 'some'} onChange={(v) => up({ scope: v === 'all' ? 'all' : (Array.isArray(b.scope) ? b.scope : []) })} options={[{value:'all',label:'كل الصفحات'},{value:'some',label:'صفحات محددة'}]} />
+          </Field>
+          {!scopeAll && (
+            <div className="mt-1 rounded-xl bg-slate-50 p-2">
+              {db.pages.length === 0 && <p className="p-2 text-center text-[12px] text-slate-400">لا صفحات بعد.</p>}
+              {db.pages.map((p) => {
+                const on = scopePages.includes(p.id)
+                return (
+                  <button key={p.id} onClick={() => up({ scope: on ? scopePages.filter((x) => x !== p.id) : [...scopePages, p.id] })} className={'my-0.5 flex w-full items-center justify-between rounded-lg px-3 py-2 text-start tap ' + (on ? 'bg-sky-100' : 'bg-white')}>
+                    <span className="text-[13px]">{p.name}</span>
+                    {on ? <span className="text-sky-600"><Icon name="check" size={16} /></span> : <span className="text-slate-300"><Icon name="plus" size={16} /></span>}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <button onClick={onClose} className="btn-primary w-full rounded-xl py-3 font-bold tap">تم</button>
+        </div>
+      </BottomSheet>
+    )
+  }
+  // popups
+  const p = entity
+  const up = (patch: any) => { store.updateEntity('popups', p.id, patch); store.toast('حُفظت إعدادات النافذة', 'ok') }
+  return (
+    <BottomSheet open={open} onClose={onClose} title="إعدادات النافذة المنبثقة" full>
+      <div className="space-y-3 pb-6">
+        <Field label="الاسم"><TextInput value={p.name} onChange={(e: any) => up({ name: e.target.value })} /></Field>
+        <Field label="الحجم / المظهر"><Seg value={p.size || 'sheet'} onChange={(v) => up({ size: v })} options={[{value:'sheet',label:'لوحة سفلية'},{value:'center',label:'صندوق وسط'},{value:'full',label:'ملء الشاشة'}]} /></Field>
+        <Field label="طريقة الإغلاق"><Seg value={p.closeMode || 'both'} onChange={(v) => up({ closeMode: v })} options={[{value:'both',label:'زر + خارجي'},{value:'button',label:'زر فقط'},{value:'outside',label:'خارجي فقط'}]} /></Field>
+        <Field label="حركة الظهور"><Seg value={p.openAnim || 'slide-up'} onChange={(v) => up({ openAnim: v })} options={[{value:'slide-up',label:'صعود'},{value:'fade',label:'تلاشٍ'},{value:'zoom',label:'تكبير'}]} /></Field>
+        <button onClick={onClose} className="btn-primary w-full rounded-xl py-3 font-bold tap">تم</button>
+      </div>
+    </BottomSheet>
+  )
 }

@@ -20,8 +20,8 @@ export class SiteEngine {
   progressRunning = new Map<string, { pct: number; cancel: boolean }>()
   listeners = new Set<() => void>()
 
-  constructor(doc: DB, hooks: Hooks) { this.doc = doc; this.hooks = hooks }
-  setDoc(d: DB) { this.doc = d; this.notify() }
+  constructor(doc: DB, hooks: Hooks) { this.doc = doc; this.hooks = hooks; this.vars = {}; for (const v of doc.variables) if (!(v.id in this.vars)) this.vars[v.id] = v.def }
+  setDoc(d: DB) { this.doc = d; for (const v of d.variables) if (!(v.id in this.vars)) this.vars[v.id] = v.def; this.notify() }
   subscribe(fn: () => void) { this.listeners.add(fn); return () => { this.listeners.delete(fn) } }
   notify() { this.listeners.forEach((f) => f()) }
 
@@ -106,12 +106,20 @@ export class SiteEngine {
       }
       case 'sequence': for (const s of a.children || []) await this.runOne(s, src); return
       case 'openLink': if (target?.kind === 'url' && target.id) window.open(target.id, '_blank'); return
-      case 'setVar': if (target?.id) this.vars[target.id] = target.label ?? a.target?.label ?? ''; return
-      case 'incVar': if (a.target?.kind === 'var' && a.target.id) this.vars[a.target.id] = (Number(this.vars[a.target.id]) || 0) + (Number(a.target.label) || 1); this.notify(); return
+      case 'setVar': { if (target?.kind === 'var' && target.id) { const n = this.doc.variables.find((v) => v.id === target.id); this.vars[target.id] = coerce(n, target.label ?? ''); this.notify() } return }
+      case 'incVar': { if (target?.kind === 'var' && target.id) { const base = Number(this.vars[target.id]) || 0; this.vars[target.id] = base + (Number(target.label) || 1); this.notify() } return }
+      case 'toggleVar': { if (target?.kind === 'var' && target.id) { this.vars[target.id] = !this.vars[target.id]; this.notify() } return }
       default: return
     }
   }
   abortedFlow: string | null = null
+}
+
+function coerce(v: { vtype: string } | undefined, raw: string): any {
+  if (!v) return raw
+  if (v.vtype === 'number') return Number(raw) || 0
+  if (v.vtype === 'bool') return raw === 'true' || raw === '1' || raw === 'نعم'
+  return raw
 }
 
 // إطلاق إجراءات "عند الظهور" للعقد الظاهرة داخل كيان فُتح (صفحة/نافذة)

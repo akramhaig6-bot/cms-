@@ -219,15 +219,18 @@ function ToastStack() {
 function Notifications({ open, onClose, go }: { open: boolean; onClose: () => void; go: () => void }) {
   const store = useStore()
   const iconByType: any = { success: { ic: 'check', bg: '#d1fae5', c: '#059669' }, error: { ic: 'close', bg: '#fee2e2', c: '#dc2626' }, warn: { ic: 'bell', bg: '#fef3c7', c: '#d97706' }, info: { ic: 'info', bg: '#e0f2fe', c: '#0284c7' }, recover: { ic: 'undo', bg: '#e0f2fe', c: '#0284c7' } }
+  const [flt, setFlt] = useState('all')
+  const filtered = store.notifications.filter((n) => flt === 'all' ? true : flt === 'unread' ? !n.read : flt === 'error' ? (n.type === 'error' || n.type === 'warn') : n.type === flt)
   return (
     <BottomSheet open={open} onClose={onClose} title="الإشعارات" full>
+      <div className="no-scrollbar flex gap-1.5 overflow-x-auto pb-2">{[['all','الكل'],['unread','غير مقروء'],['info','معلومات'],['success','نجاح'],['warn','تنبيهات'],['error','أخطاء'],['recover','استعادة']].map(([v, l]) => <button key={v} onClick={() => setFlt(v)} className={'shrink-0 rounded-full px-3 py-1.5 text-[11.5px] font-semibold tap ' + (flt === v ? 'bg-sky-500 text-white' : 'bg-slate-100 text-slate-500')}>{l}</button>)}</div>
       <div className="mb-2 flex items-center justify-between">
         <button onClick={() => store.markAllRead()} className="text-[12px] font-semibold text-sky-600 tap">تعليم الكل كمقروء</button>
         <span className="text-[11.5px] text-slate-400">{store.notifications.filter((n) => !n.read).length} غير مقروء</span>
       </div>
       <div className="space-y-2 pb-4">
-        {store.notifications.length === 0 && <div className="py-10 text-center text-[13px] text-slate-400">لا إشعارات.</div>}
-        {store.notifications.map((n) => { const m = iconByType[n.type] || iconByType.info; return (
+        {filtered.length === 0 && <div className="py-10 text-center text-[13px] text-slate-400">لا إشعارات ضمن هذا التصنيف.</div>}
+        {filtered.map((n) => { const m = iconByType[n.type] || iconByType.info; return (
           <div key={n.id} onClick={() => store.markAllRead()} className={'rounded-2xl border p-3 ' + (n.read ? 'border-slate-100 bg-white' : 'border-sky-200 bg-sky-50')}>
             <div className="flex gap-2.5">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: m.bg, color: m.c }}><Icon name={m.ic} size={16} /></span>

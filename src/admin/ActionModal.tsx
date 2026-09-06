@@ -19,6 +19,9 @@ const TYPES: { t: ActionType; label: string; group: string }[] = [
   { t: 'toggleBar', label: 'تبديل طي شريط', group: 'أشرطة' },
   { t: 'runFlow', label: 'تشغيل تدفق مُعرَّف', group: 'تدفقات' },
   { t: 'openLink', label: 'فتح رابط خارجي', group: 'تنقل' },
+  { t: 'setVar', label: 'تعيين قيمة متغير', group: 'متغيرات' },
+  { t: 'incVar', label: 'زيادة متغير رقمي', group: 'متغيرات' },
+  { t: 'toggleVar', label: 'تبديل متغير منطقي', group: 'متغيرات' },
 ]
 
 export function ActionModal({ open, onClose, doc, initial, onSave }: {
@@ -34,6 +37,8 @@ export function ActionModal({ open, onClose, doc, initial, onSave }: {
   const [showNode, setShowNode] = useState<{ id: string; label: string } | null>(initial?.showId ? { id: initial.showId, label: 'مكوّن' } : null)
   const [hideNode, setHideNode] = useState<{ id: string; label: string } | null>(initial?.hideId ? { id: initial.hideId, label: 'مكوّن' } : null)
   const [url, setUrl] = useState(initial?.type === 'openLink' ? initial.target?.id || '' : '')
+  const [varId, setVarId] = useState(initial?.target?.kind === 'var' ? initial.target.id : '')
+  const [varVal, setVarVal] = useState(initial?.target?.kind === 'var' ? (initial.target.label || '') : '')
   const [delay, setDelay] = useState(initial?.delay || 0)
 
   const setT = (t: ActionType) => { setType(t) }
@@ -42,6 +47,7 @@ export function ActionModal({ open, onClose, doc, initial, onSave }: {
   const needsPopup = type === 'openPopup' || type === 'closePopup'
   const needsBar = ['foldBar', 'unfoldBar', 'toggleBar'].includes(type)
   const needsFlow = type === 'runFlow'
+  const needsVar = ['setVar', 'incVar', 'toggleVar'].includes(type)
 
   const save = () => {
     let target: Action['target']
@@ -51,6 +57,7 @@ export function ActionModal({ open, onClose, doc, initial, onSave }: {
     else if (needsFlow) target = { kind: 'flow', id: flowId, label: doc.flows.find((f) => f.id === flowId)?.name }
     else if (needsNode) target = nodePick ? { kind: 'node', id: nodePick.id, label: nodePick.label } : undefined
     else if (type === 'openLink') target = { kind: 'url', id: url, label: url }
+    else if (needsVar) { const v = doc.variables.find((x) => x.id === varId); target = { kind: 'var', id: varId, label: type === 'incVar' ? (varVal || '1') : (type === 'toggleVar' ? '' : varVal) } }
     const a: Action = { id: initial?.id || ('a' + Math.random().toString(36).slice(2, 8)), type, target, delay: delay || undefined, showId: type === 'showAndHide' ? showNode?.id : undefined, hideId: type === 'showAndHide' ? hideNode?.id : undefined }
     onSave(a); onClose()
   }
@@ -74,6 +81,14 @@ export function ActionModal({ open, onClose, doc, initial, onSave }: {
         {type === 'showAndHide' && <>
           <Field label="المكوّن الذي يظهر"><NodePickB doc={doc} value={showNode} onPick={setShowNode} /></Field>
           <Field label="المكوّن الذي يُخفى"><NodePickB doc={doc} value={hideNode} onPick={setHideNode} /></Field>
+        </>}
+        {needsVar && <>
+          <Field label="المتغير">
+            {doc.variables.length === 0 ? <div className="rounded-xl bg-amber-50 p-2.5 text-[12px] text-amber-700">لا متغيرات بعد — أضفها من إعدادات الموقع ← المتغيرات.</div> :
+              <Select value={varId} onChange={setVarId} options={[{ value: '', label: 'اختر متغيرًا…' }, ...doc.variables.map((v) => ({ value: v.id, label: v.name + (v.vtype === 'number' ? ' (رقم)' : v.vtype === 'bool' ? ' (منطقي)' : '') }))]} />}
+          </Field>
+          {type === 'setVar' && varId && <Field label="القيمة الجديدة"><TextInput dir="ltr" value={varVal} onChange={(e: any) => setVarVal(e.target.value)} placeholder={doc.variables.find((v) => v.id === varId)?.vtype === 'bool' ? 'true/false' : ''} /></Field>}
+          {type === 'incVar' && <Field label="قيمة الزيادة (افتراضي 1)"><TextInput dir="ltr" type="number" value={varVal} onChange={(e: any) => setVarVal(e.target.value)} placeholder="1" /></Field>}
         </>}
         {type === 'openLink' && <Field label="الرابط الخارجي"><TextInput dir="ltr" value={url} onChange={(e: any) => setUrl(e.target.value)} placeholder="https://…" /></Field>}
         <Field label="تأخير (بالثواني)"><TextInput type="number" value={delay} onChange={(e: any) => setDelay(Number(e.target.value) || 0)} /></Field>

@@ -14,7 +14,17 @@ interface Props {
   isolated?: boolean
 }
 
-export function animStyle(node: Node, reduce: boolean): CSSProperties | undefined {
+export function expandVars(text: string, eng: SiteEngine): string {
+  if (!text || !text.includes('[[')) return text
+  return text.replace(/\[\[var:([^\]]+)\]\]/g, (_, name) => {
+    const v = eng.doc.variables.find((x) => x.name === name || x.id === name)
+    if (!v) return ''
+    const val = eng.vars[v.id]
+    return val == null ? String(v.def ?? '') : String(val)
+  })
+}
+
+function animStyle(node: Node, reduce: boolean): CSSProperties | undefined {
   if (reduce || !node.animIn || node.animIn === 'none') return undefined
   return { animation: animMap[node.animIn] || 'aFade .3s ease both' }
 }
@@ -182,17 +192,19 @@ export default function Site({ doc, initialPath = '/', isolated = false }: Props
     if (node.type === 'text' && (!node.text || !node.text.trim())) {
       if (node.hideWhenEmpty) return null
     }
+    // استبدال [[var:name]] في النصوص بقيم المتغيرات الحية
+    const effNode = node.type === 'text' || node.type === 'button' ? { ...node, text: expandVars(node.text || '', eng) } : node
     if (clickable && node.type === 'button') {
       const prog = node.progress?.enabled ? node.progress : undefined
       if (prog) {
-        return <InteractiveButton key={node.id} node={node} eng={eng} settings={settings} media={mediaArr} onClick={press} progress={prog} onClickEvent={() => { if (node.events?.click?.length) eng.run(node, node.events.click, { requireProgress: true }) }} />
+        return <InteractiveButton key={node.id} node={effNode} eng={eng} settings={settings} media={mediaArr} progress={prog} onClickEvent={() => { if (node.events?.click?.length) eng.run(node, node.events.click, { requireProgress: true }) }} />
       }
-      return <span key={node.id} onClick={(e) => { e.stopPropagation(); press() }} style={{ display: 'inline-block', cursor: 'pointer' }}><LeafContent node={node} ctx={{ settings, media: mediaArr }} /></span>
+      return <span key={node.id} onClick={(e) => { e.stopPropagation(); press() }} style={{ display: 'inline-block', cursor: 'pointer' }}><LeafContent node={effNode} ctx={{ settings, media: mediaArr }} /></span>
     }
     if (clickable) {
-      return <div key={node.id} onClick={(e) => { e.stopPropagation(); press() }} style={wrapStyle}><LeafContent node={node} ctx={{ settings, media: mediaArr }} /></div>
+      return <div key={node.id} onClick={(e) => { e.stopPropagation(); press() }} style={wrapStyle}><LeafContent node={effNode} ctx={{ settings, media: mediaArr }} /></div>
     }
-    return <div key={node.id} style={wrapStyle}><LeafContent node={node} ctx={{ settings, media: mediaArr }} /></div>
+    return <div key={node.id} style={wrapStyle}><LeafContent node={effNode} ctx={{ settings, media: mediaArr }} /></div>
   }
 
   const renderBar = (bar: Bar) => {

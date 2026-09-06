@@ -96,6 +96,20 @@ export function seedDB(): DB {
   footer.children = [ft]
   homePage.root.children.push(prod, footer)
 
+  // ===== عرض تفاعلي للمتغيرات (زيارة/عدّاد) =====
+  const demo = S('s_demo', 'تجرِبة المتغيرات', { bg: '#f8fafc', pt: 18, pr: 18, pb: 18, pl: 18 })
+  const dhead = T('d_h', '⏱ عدّاد جلسة الزوار (متغيرات حية)', { textSize: 'base' as any, textWeight: 700, color: '#0f172a' }, 'heading3')
+  const dval = T('d_val', 'زياراتك الآن: [[var:var1]]', { textSize: 'xl' as any, textWeight: 800, textAlign: 'center' as any, color: '#0ea5e9', mt: 6 })
+  const drows: any = createNode('row'); drows.id = 'd_row'; drows.style = { ...drows.style, gap: 8, alignX: 'center' as any, pt: 8 } as any
+  const bInc = Btn('b_inc', '+ زيارة واحدة', { bg: '#0ea5e9', color: '#fff', textSize: 'xs' as any, radius: 10 })
+  bInc.events.click = [{ id: uid('a'), type: 'incVar', target: { kind: 'var', id: 'var1', label: '1' } }]
+  const bRes = Btn('b_res', 'إعادة تصفير', { bg: '#e2e8f0', color: '#475569', textSize: 'xs' as any, radius: 10 })
+  bRes.events.click = [{ id: uid('a'), type: 'setVar', target: { kind: 'var', id: 'var1', label: '0' } }]
+  drows.children = [bInc, bRes]
+  const dnote = T('d_note', 'المتغير يحيا خلال جلستك هنا فقط. أضِف مثل هذا العدّاد من /admin.', { color: '#94a3b8', textSize: 'xs' as any, textAlign: 'center' as any, mt: 4 })
+  demo.children = [dhead, dval, drows, dnote]
+  homePage.root.children.push(demo)
+
   // صفحة المتجر
   const shopRoot = S('root', 'الجذر', { pt: 0, pr: 0, pb: 0, pl: 0, bg: '#f0f9ff' })
   const shopPage: any = {
